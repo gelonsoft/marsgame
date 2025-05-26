@@ -3,7 +3,7 @@ from pettingzoo import AECEnv
 from pettingzoo.utils import wrappers
 
 class TerraformingMarsEnv(AECEnv):
-    def __init__(self, num_players=2):
+    def __init__(self, num_players=2, render_callback=None):
         super().__init__()
         self.num_players = num_players
         self.players = [self.create_player() for _ in range(num_players)]
@@ -12,6 +12,7 @@ class TerraformingMarsEnv(AECEnv):
         self.generation = 1  # ✅ Add this line
         self.tiles=[]
         self.ocean_positions={}
+        self.render_callback=render_callback
         self.reset()
 
     def create_player(self):
@@ -70,6 +71,7 @@ class TerraformingMarsEnv(AECEnv):
         reward = self.handle_action(action)
 
         self.next_turn()
+        self.update_front()
         return self.observe(), reward, False, {}
 
     def next_turn(self):
@@ -84,6 +86,11 @@ class TerraformingMarsEnv(AECEnv):
             img = np.zeros((500, 500, 3), dtype=np.uint8)
             # Add your rendering logic here
             return img
+    def update_front(self):
+        if self.render_callback:
+            self.render_callback()
+
+        
     def player_pass(self):
         self.passed_players.add(self.current_player)
         self.next_turn()
@@ -114,7 +121,7 @@ class TerraformingMarsEnv(AECEnv):
         reward = 0
 
         action_type = action.get('type')
-
+        print(f"Handle action type={action_type}")
         if action_type == 'standard_project':
             name = action['name']
             if name == 'asteroid' and player['mc'] >= 14:
@@ -133,6 +140,9 @@ class TerraformingMarsEnv(AECEnv):
                 self.global_parameters['oceans'] += 1
                 player['terraform_rating'] += 1
                 reward = 1
+            else:
+                reward=-1
+                print("Bad standard project")
 
         elif action_type == 'play_card':
             name = action['card_name']
@@ -148,6 +158,10 @@ class TerraformingMarsEnv(AECEnv):
                 player['production']['plants'] += 1
                 player['played_cards'].append({'name': name})
                 reward = 1
+            else:
+                print("Bad card")
+                reward = -1  # not enough MC or invalid card name
+
 
         elif action_type == 'place_tile':
             tile_type = action['tile_type']
@@ -155,31 +169,36 @@ class TerraformingMarsEnv(AECEnv):
 
             # Check bounds
             if not (0 <= x < self.map_width and 0 <= y < self.map_height):
-                return -1  # invalid
+                reward=-1  # invalid
+            else:
+                tile = self.tiles[y][x]
 
-            tile = self.tiles[y][x]
+                if tile['type'] != 'empty':
+                    reward= -1  # already occupied
+                else:
+                    if tile_type == 'city':
+                        # Check no adjacent cities
+                        for dx in [-1, 0, 1]:
+                            for dy in [-1, 0, 1]:
+                                if (0 <= y+dy < self.map_height) and (0 <= x+dx < self.map_width):
+                                    neighbor = self.tiles[y+dy][x+dx]
+                                    if neighbor['type'] == 'city':
+                                        return -1  # invalid city adjacency
 
-            if tile['type'] != 'empty':
-                return -1  # already occupied
+                    if tile_type == 'ocean' and (y, x) not in self.ocean_positions:
+                        reward=-1  # invalid ocean placement
+                    else:
+                        self.tiles[y][x] = {'type': tile_type, 'owner': self.current_player}
 
-            if tile_type == 'city':
-                # Check no adjacent cities
-                for dx in [-1, 0, 1]:
-                    for dy in [-1, 0, 1]:
-                        if (0 <= y+dy < self.map_height) and (0 <= x+dx < self.map_width):
-                            neighbor = self.tiles[y+dy][x+dx]
-                            if neighbor['type'] == 'city':
-                                return -1  # invalid city adjacency
 
-            if tile_type == 'ocean' and (y, x) not in self.ocean_positions:
-                return -1  # invalid ocean placement
+                        # TR bonuses
+                        if tile_type in ['city', 'greenery', 'ocean']:
+                            self.players[self.current_player]['terraform_rating'] += 1
 
-            self.tiles[y][x] = {'type': tile_type, 'owner': self.current_player}
-
-            # TR bonuses
-            if tile_type in ['city', 'greenery', 'ocean']:
-                self.players[self.current_player]['terraform_rating'] += 1
-
-            return 1
+                        reward = 1
+        else:
+            print(f"Unknown action type {action_type}")
+            reward=-1
+        print(f"Reward: {reward} player_mc={player['mc']}")
 
         return reward

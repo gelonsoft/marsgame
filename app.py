@@ -2,13 +2,19 @@
 import streamlit as st
 import numpy as np
 from env import TerraformingMarsEnv  # replace with your actual module
-from streamlit_plotly_events import plotly_events
+from streamlit_plotly_events2 import plotly_events
 import plotly.graph_objects as go
 import numpy as np
+import random
 
+def set_z():
+    print("Set z")
+    
 # Initialize session state
 if 'env' not in st.session_state:
-    st.session_state.env = TerraformingMarsEnv(num_players=2)
+    print("init")
+    st.session_state.env = TerraformingMarsEnv(num_players=2,render_callback=set_z )
+    st.session_state.z=1
     st.session_state.env.reset()
 
 env = st.session_state.env
@@ -23,6 +29,8 @@ card_icons = {
     'Lichen': '🌿',
     'Nuclear Zone': '💥'
 }
+
+
 
 # === Player Dashboards ===
 cols = st.columns(env.num_players)
@@ -81,16 +89,131 @@ if st.button("🌿 Play 'Lichen' (7 MC → +1 Plant Prod)"):
     action = {'type': 'play_card', 'card_name': 'Lichen'}
     env.step(action)
 
-# --- Tile Placement (simplified positions) ---
-st.markdown("#### Tile Placement")
 
-if st.button("🟩 Place Greenery at (2, 2)"):
-    action = {'type': 'place_tile', 'tile_type': 'greenery', 'position': (2, 2)}
-    env.step(action)
+    
+# === Tile Type Selector ===
+tile_type = st.radio("Select Tile Type to Place:", ["greenery", "city", "ocean"], horizontal=True)
+# === Interactive Hex Grid ===
 
-if st.button("🏙️ Place City at (3, 3)"):
-    action = {'type': 'place_tile', 'tile_type': 'city', 'position': (3, 3)}
-    env.step(action)
+@st.fragment
+def render_tm():
+    print("Render TM")
+    st.markdown("### 🗺️ Terraforming Mars - Click to Place Tile")
+
+    HEX_RADIUS = 2
+    HEX_HEIGHT = np.sqrt(3) * HEX_RADIUS
+    NUM_ROWS = 5
+    NUM_COLS = 9
+
+    hex_centers = []
+    for row in range(NUM_ROWS):
+        for col in range(NUM_COLS):
+            y = col * 1.5 * HEX_RADIUS
+            x = row * HEX_HEIGHT + (HEX_HEIGHT / 2 if col % 2 else 0)
+            hex_centers.append((x, y, row, col))
+
+    def hexagon(x_center, y_center, radius):
+        angle_offset = np.pi / 6
+        return [
+            (
+                x_center + radius * np.cos(angle_offset + i * np.pi / 3),
+                y_center + radius * np.sin(angle_offset + i * np.pi / 3)
+            )
+            for i in range(6)
+        ]
+
+
+    fig = go.Figure(layout=dict(    title="Terraforming Mars - Hex Grid",
+        xaxis=dict(showgrid=False, zeroline=False, visible=False),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False),
+        margin=dict(l=10, r=10, t=40, b=10),
+        #height=700,
+        width=800,
+        clickmode='event+select'))
+    
+
+    for x, y, row, col in hex_centers:
+        
+        verts = hexagon(x, y, HEX_RADIUS)
+        xs, ys = zip(*verts)
+        xs += (xs[0],)
+        ys += (ys[0],)
+
+        tile = env.tiles[row][col]
+        if row==0 and col==0:
+            print(f"Render tile={tile}")
+        color = {
+            'empty': 'lightgray',
+            'greenery': 'green',
+            'city': 'blue',
+            'ocean': 'aqua'
+        }.get(tile['type'], 'gray')
+
+        fig.add_trace(go.Scatter(
+            x=xs,
+            y=ys,
+            mode='lines',
+            fill='toself',
+            fillcolor=color,
+            line=dict(color='black'),
+            hoverinfo='text',
+            text=f"({row},{col})\n{tile['type']}",
+            customdata=[(row, col)] * len(xs),
+            showlegend=False
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=[x],
+            y=[y],
+            mode='text',
+            text=[f"{row},{col}"],
+            customdata=[(row, col)],
+            showlegend=False
+        ))
+
+    fig.layout.template = None # to slim down the output
+
+    #fig.update_layout(
+    #    title="Terraforming Mars - Hex Grid",
+    #    xaxis=dict(showgrid=False, zeroline=False, visible=False),
+    #    yaxis=dict(showgrid=False, zeroline=False, visible=False),
+    #    margin=dict(l=10, r=10, t=40, b=10),
+    #    #height=700,
+    #    width=800,
+    #    clickmode='event+select'
+    #)
+
+    #Clear figure 
+
+
+
+
+
+    #st.plotly_chart(fig, use_container_width=True)
+    selected_points = plotly_events(fig,select_event=False,click_event=True,hover_event=False)
+
+    # === Placement Logic ===
+    if selected_points:
+        print(selected_points)
+        #print(fig.data[selected_points[0]["curveNumber"]])
+        row, col = fig.data[selected_points[0]["curveNumber"]]['customdata'][0] #selected_points[0]['customdata']
+        
+        observe,reward,done,info = env.step({'type': 'place_tile', 'tile_type': tile_type, 'position': (col, row)})
+        print(f"observe={observe} reward={reward} done={done} info={info}")
+
+        if reward == -1:
+            st.error(f"Invalid placement for {tile_type} at ({row}, {col})")
+        else:
+            st.success(f"Placed {tile_type} at ({row}, {col})! +1 TR")
+            selected_points=None
+            st.rerun(scope="fragment")
+                
+
+                
+                
+render_tm()
+
+#st.plotly_chart(fig, use_container_width=True)
 
 # === End Turn / Reset ===
 col1, col2 = st.columns(2)
@@ -101,152 +224,7 @@ if col1.button("➡️ End Turn"):
 if col2.button("🔄 Reset Game"):
     st.session_state.env = TerraformingMarsEnv(num_players=2)
     st.session_state.env.reset()
-    st.experimental_rerun()
+    st.rerun()
 
 if st.button("🚫 Pass Turn"):
     env.step("pass")
-    
-   
-st.markdown("### 🗺️ Interactive Tile Map")
-
-fig = go.Figure()
-
-colors = {
-    'empty': '#ffffff',
-    'city': '#9999ff',
-    'greenery': '#88cc88',
-    'ocean': '#66ccff'
-}
-
-symbol_map = {
-    None: '',
-    0: "P1",
-    1: "P2"
-}
-
-# Draw hexagons
-for y in range(env.map_height):
-    for x in range(env.map_width):
-        tile = env.tiles[y][x]
-        tile_type = tile['type']
-        owner = tile['owner']
-        color = colors.get(tile_type, '#eeeeee')
-
-        fig.add_shape(
-            type="rect",
-            x0=x, y0=y, x1=x+1, y1=y+1,
-            line=dict(color="gray"),
-            fillcolor=color
-        )
-        fig.add_trace(go.Scatter(
-            x=[x+0.5],
-            y=[y+0.5],
-            text=[symbol_map.get(owner)],
-            mode="text",
-            showlegend=False
-        ))
-
-fig.update_layout(
-    width=600,
-    height=400,
-    xaxis=dict(showgrid=False, zeroline=False, visible=False),
-    yaxis=dict(showgrid=False, zeroline=False, visible=False),
-    margin=dict(l=0, r=0, t=0, b=0)
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-click_data = st.session_state.get('click_data')
-clicked_tile = st.session_state.get('clicked_tile', None)
-
-if click_data := st.session_state.get('plotly_click'):
-    point = click_data['points'][0]
-    x = int(point['x'])
-    y = int(point['y'])
-    clicked_tile = (x, y)
-    st.session_state['clicked_tile'] = clicked_tile
-    
-click_data = plotly_events(fig, click_event=True, hover_event=False)
-if click_data:
-    point = click_data[0]
-    x = int(point['x'])
-    y = int(point['y'])
-    st.session_state['clicked_tile'] = (x, y)
-
-# Show click + action buttons
-if clicked_tile:
-    st.markdown(f"Clicked tile: {clicked_tile}")
-
-    col1, col2, col3 = st.columns(3)
-    if col1.button("Place City Here"):
-        env.step({'type': 'place_tile', 'tile_type': 'city', 'position': clicked_tile})
-    if col2.button("Place Greenery Here"):
-        env.step({'type': 'place_tile', 'tile_type': 'greenery', 'position': clicked_tile})
-    if col3.button("Place Ocean Here"):
-        env.step({'type': 'place_tile', 'tile_type': 'ocean', 'position': clicked_tile})
-
-
-# Hexagonal Map Rendering
-st.markdown("### 🗺️ Terraforming Mars - Hex Map")
-
-HEX_RADIUS = 1
-HEX_HEIGHT = np.sqrt(3) * HEX_RADIUS
-NUM_ROWS = 9
-NUM_COLS = 9
-
-hex_centers = []
-for row in range(NUM_ROWS):
-    for col in range(NUM_COLS):
-        if (row + col) % 2 == 0:
-            x = col * 1.5 * HEX_RADIUS
-            y = row * HEX_HEIGHT + (HEX_HEIGHT / 2 if col % 2 else 0)
-            hex_centers.append((x, y, row, col))
-
-def hexagon(x_center, y_center, radius):
-    angle_offset = np.pi / 6
-    return [
-        (
-            x_center + radius * np.cos(angle_offset + i * np.pi / 3),
-            y_center + radius * np.sin(angle_offset + i * np.pi / 3)
-        )
-        for i in range(6)
-    ]
-
-fig = go.Figure()
-
-for x, y, row, col in hex_centers:
-    verts = hexagon(x, y, HEX_RADIUS)
-    xs, ys = zip(*verts)
-    xs += (xs[0],)
-    ys += (ys[0],)
-
-    fig.add_trace(go.Scatter(
-        x=xs,
-        y=ys,
-        mode='lines',
-        fill='toself',
-        line=dict(color='gray'),
-        hoverinfo='text',
-        text=f"({row},{col})",
-        showlegend=False
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=[x],
-        y=[y],
-        mode='text',
-        text=[f"{row},{col}"],
-        textposition="middle center",
-        showlegend=False
-    ))
-
-fig.update_layout(
-    title="Terraforming Mars - Hex Grid Layout",
-    xaxis=dict(showgrid=False, zeroline=False, visible=False),
-    yaxis=dict(showgrid=False, zeroline=False, visible=False),
-    margin=dict(l=10, r=10, t=40, b=10),
-    height=700,
-    width=800
-)
-
-st.plotly_chart(fig, use_container_width=True)
