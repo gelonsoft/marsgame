@@ -7,6 +7,8 @@ import plotly.graph_objects as go
 import numpy as np
 import random
 
+
+print("Started")
 def set_z():
     print("Set z")
     
@@ -19,6 +21,7 @@ if 'env' not in st.session_state:
 
 env = st.session_state.env
 current_player = env.players[env.current_player]
+player = env.players[env.current_player]
 
 # === Header ===
 st.title("🌍 Terraforming Mars Web UI")
@@ -32,36 +35,50 @@ card_icons = {
 
 
 
-# === Player Dashboards ===
-cols = st.columns(env.num_players)
-for i, col in enumerate(cols):
-    player = env.players[i]
-    with col:
-        st.subheader(f"Player {i + 1}")
-        st.text(f"TR: {player['terraform_rating']}")
-        st.text(f"MC: {player['mc']} | Heat: {player['heat']} | Plants: {player['plants']}")
-        st.text(f"Steel: {player['steel']} | Titanium: {player['titanium']}")
-        st.text(f"Energy: {player['energy']}")
-        st.markdown(f"Production: {player['production']}")
+# === Player Dashboard ===
+st.subheader("📊 Player Resources")
+st.text(f"TR: {player['terraform_rating']} | MC: {player['mc']} | Heat: {player['heat']} | Plants: {player['plants']}")
+st.text(f"Steel: {player['steel']} | Titanium: {player['titanium']} | Energy: {player['energy']}")
+st.markdown(f"**Production:** {player['production']}")
 
-        # ✅ Add this section for played cards
-        if player['played_cards']:
-            st.markdown("**Played Cards:**")
-            for card in player['played_cards']:
-                icon = card_icons.get(card['name'], '📄')
-                st.markdown(f"{icon} **{card['name']}**")
-        else:
-            st.markdown("_No cards played yet._")
-
-
-# === Global State ===
-st.markdown("### 🌐 Global Parameters")
+# === Global Parameters ===
+st.subheader("🌐 Global Parameters")
 st.text(f"Temperature: {env.global_parameters['temperature']}°C")
 st.text(f"Oxygen: {env.global_parameters['oxygen']}%")
 st.text(f"Oceans: {env.global_parameters['oceans']}/9")
 
-# === Action Buttons ===
-st.markdown("## 🛠️ Actions")
+# === Cards in Hand ===
+st.subheader("🃏 Cards in Hand")
+if not player['hand']:
+    st.info("You have no cards in hand.")
+else:
+    for card in player['hand']:
+        playable = env.can_play_card(player, card)
+        card_info = f"""**{card['name']}**  
+Cost: {card['cost']} MC  
+Effect: `{card['effects']}`  
+
+Tags: {', '.join(card.get('tags', []))}"""
+        st.markdown(card_info)
+        if playable:
+            if st.button(f"Play {card['name']}"):
+                env.step({'type': 'draft_card', 'card': card})
+                st.rerun()
+        else:
+            st.button(f"Cannot Play ({card['name']})", disabled=True, help="Check cost or requirements")
+
+# === Played Cards ===
+st.subheader("✅ Played Cards")
+if not player['played_cards']:
+    st.text("None yet.")
+else:
+    for card in player['played_cards']:
+        effects_preview = ", ".join(
+            f"{e['type']}({e.get('target', e.get('resource', e.get('tile', e.get('scope', ''))))}: {e.get('amount', '')})"
+            for e in card.get("effects", [])
+        )
+        st.markdown(f"- **{card['name']}** ({card['type']}) [{', '.join(card.get('tags', []))}] → {effects_preview}")
+
 
 # --- Standard Projects ---
 st.markdown("#### Standard Projects")
@@ -76,17 +93,6 @@ if st.button("⚡ Power Plant (11 MC → +1 Energy Prod)"):
 
 if st.button("💧 Aquifer (18 MC → Place Ocean)"):
     action = {'type': 'standard_project', 'name': 'aquifer'}
-    env.step(action)
-
-# --- Cards (simplified) ---
-st.markdown("#### Project Cards")
-
-if st.button("🌠 Play 'Comet' (21 MC → Raise Temp)"):
-    action = {'type': 'play_card', 'card_name': 'Comet'}
-    env.step(action)
-
-if st.button("🌿 Play 'Lichen' (7 MC → +1 Plant Prod)"):
-    action = {'type': 'play_card', 'card_name': 'Lichen'}
     env.step(action)
 
 
@@ -228,3 +234,4 @@ if col2.button("🔄 Reset Game"):
 
 if st.button("🚫 Pass Turn"):
     env.step("pass")
+    
