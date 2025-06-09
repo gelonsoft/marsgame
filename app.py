@@ -35,6 +35,8 @@ card_icons = {
 }
 
 # === Player Dashboard ===
+if player.get('corporation'):
+    st.markdown(f"**Corporation:** 🏢 {player['corporation']}")
 st.subheader("📊 Player Resources")
 st.text(f"TR: {player['terraform_rating']} | MC: {player['mc']} | Heat: {player['heat']} | Plants: {player['plants']}")
 st.text(f"Steel: {player['steel']} | Titanium: {player['titanium']} | Energy: {player['energy']}")
@@ -46,12 +48,23 @@ st.text(f"Temperature: {env.global_parameters['temperature']}°C")
 st.text(f"Oxygen: {env.global_parameters['oxygen']}%")
 st.text(f"Oceans: {env.global_parameters['oceans']}/9")
 
+if env.choose_corporation_phase:
+    st.subheader("🏢 Choose Corporation")
+    for corp in player['corporation_choices']:
+        with st.expander(corp['name']):
+            st.markdown(f"**Starting MC:** {corp['mc']}")
+            for effect in corp['effect']:
+                st.markdown(f"- `{effect}`")
+            if st.button(f"Choose {corp['name']}"):
+                env.step({'type': 'choose_corporation', 'name': corp['name']})
+                st.rerun()
+                    
 # === Draft Phase UI ===
 if env.draft_phase:  # Only show for human player
     st.subheader("🃏 Draft Phase - Select 1 Card to Keep")
 
     for card in player['draft_hand']:
-            card_info = f"""**{card['name']}**  
+            card_info = f"""**{card['name']}** ({card['type']})  
     Cost: {card['cost']} MC  
     Effect: `{card['effects']}`  
     Tags: {', '.join(card.get('tags', []))}"""
@@ -64,6 +77,37 @@ if env.draft_phase:  # Only show for human player
         print("End draft")
         env.step({"type":"end_turn"})
 
+st.subheader("🏁 Milestones")
+claimed = getattr(env, 'claimed_milestones', [])
+for name, condition in env.milestones.items():
+    claimed_by_any = name in claimed
+    eligible = condition(player)
+    if claimed_by_any:
+        st.markdown(f"- ✅ {name} (claimed)")
+    elif eligible and player['mc'] >= 8 and env.action_phase:
+        if st.button(f"Claim Milestone: {name}"):
+            env.step({"type": "claim_milestone", "name": name})
+            st.rerun()
+    elif env.action_phase:
+        st.markdown(f"- ❌ {name} (not eligible or already claimed)")
+    else:
+        st.markdown(f"- 💰 {name}")
+
+st.subheader("🎯 Awards")
+funded = getattr(env, 'funded_awards', [])
+for name in env.awards:
+    funded_by_any = name in funded
+    if funded_by_any:
+        st.markdown(f"- 💰 {name} (funded)")
+    elif player['mc'] >= 8 and env.action_phase:
+        if st.button(f"Fund Award: {name}"):
+            env.step({"type": "fund_award", "name": name})
+            st.rerun()
+    elif env.action_phase:
+        st.markdown(f"- ❌ {name} (not enough MC or already funded)")
+    else:
+        st.markdown(f"- 💰 {name}")
+        
 # --- Standard Projects ---
 if env.action_phase:
     st.markdown("#### Standard Projects")
@@ -79,42 +123,70 @@ if env.action_phase:
             if st.button(card['name']):
                 action = {'type': 'play_card', 'card_name': card['name']}
                 env.step(action)      
-            
-# === Cards in Hand ===
-st.subheader("🃏 Cards in Hand")
-if not player['hand']:
-    st.info("You have no cards in hand.")
-else:
-    for card in player['hand']:
-        playable = env.can_play_card(player, card)
-        card_info = f"""**{card['name']}**  
-Cost: {card['cost']} MC  
-Effect: `{card['effects']}`  
 
-Tags: {', '.join(card.get('tags', []))}"""
+# === Cards in Hand ===
+if not env.choose_corporation_phase:
+    st.subheader("🃏 Cards in Hand")
+    if not player['hand']:
+        st.info("You have no cards in hand.")
+    else:
+        for card in player['hand']:
+            playable = env.can_play_card(player, card)
+            card_info = f"""**{card['name']}**  
+    Cost: {card['cost']} MC  
+    Effect: `{card['effects']}`  
+    Tags: {', '.join(card.get('tags', []))}"""
+            st.markdown(card_info)
+            if env.action_phase:
+                if playable:
+                    if st.button(f"Play {card['name']}"):
+                        env.step({'type': 'play_card', 'card_name': card['name']})
+                        st.rerun()
+                else:
+                    st.button(f"Cannot Play ({card['name']})", disabled=True, help="Check cost or requirements")
+
+# === Active cards  ===
+if not env.choose_corporation_phase:
+    st.subheader("⚙️ Active Cards")
+    for card in player['played_cards']:
+        if card.get('type') != 'active':
+            continue
+
+        card_info = f"**{card['name']}**  \
+        Tags: {', '.join(card.get('tags', []))}"
         st.markdown(card_info)
-        if env.action_phase:
-            if playable:
-                if st.button(f"Play {card['name']}"):
-                    env.step({'type': 'play_card', 'card_name': card['name']})
-                    st.rerun()
-            else:
-                st.button(f"Cannot Play ({card['name']})", disabled=True, help="Check cost or requirements")
+
+        # Show resource counters if present
+        resources = card.get('resources', {})
+        if resources:
+            for rname, rvalue in resources.items():
+                st.markdown(f"- Resource `{rname}`: **{rvalue}**")
+
+        # Show action button if card has action trigger
+        for ae in card.get('active_effects', []):
+            if ae.get('trigger') == 'action':
+                label = ae.get('description', 'Use Action')
+                if env.action_phase:
+                    if st.button(f"🛠 {label} ({card['name']})"):
+                        env.step({'type': 'active_card_action', 'card_name': card['name']})
 
 # === Played Cards ===
-st.subheader("✅ Played Cards")
-if not player['played_cards']:
-    st.text("None yet.")
-else:
-    for card in player['played_cards']:
-        effects_preview = ", ".join(
-            f"{e['type']}({e.get('target', e.get('resource', e.get('tile', e.get('scope', ''))))}: {e.get('amount', '')})"
-            for e in card.get("effects", [])
-        )
-        st.markdown(f"- **{card['name']}** ({card['type']}) [{', '.join(card.get('tags', []))}] → {effects_preview}")
+if not env.choose_corporation_phase:
+    st.subheader("✅ Played Cards")
+    if not player['played_cards']:
+        st.text("None yet.")
+    else:
+        for card in player['played_cards']:
+            if card.get('type') == 'active':
+                continue
+            effects_preview = ", ".join(
+                f"{e['type']}({e.get('target', e.get('resource', e.get('tile', e.get('scope', ''))))}: {e.get('amount', '')})"
+                for e in card.get("effects", [])
+            )
+            st.markdown(f"- **{card['name']}** ({card['type']}) [{', '.join(card.get('tags', []))}] → {effects_preview}")
 
 # === Tile Type Selector ===
-tile_type = st.radio("Select Tile Type to Place:", ["greenery", "city", "ocean"], horizontal=True)
+#tile_type = st.radio("Select Tile Type to Place:", ["greenery", "city", "ocean"], horizontal=True)
 # === Interactive Hex Grid ===
 
 @st.fragment

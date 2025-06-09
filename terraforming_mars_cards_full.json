@@ -1,4 +1,77 @@
 {
+  "corporations": [
+    {
+        "name": "Thorgate",
+        "mc": 48,
+        "expansion":"Base",
+        "effect": [
+            {"type": "production", "resource": "energy", "amount": 1},
+            {"type": "discount", "scope": "power", "amount": 3}
+        ]
+    },
+    {
+        "name": "Helion",
+        "mc": 42,
+        "expansion":"Base",
+        "effect": [
+            {"type": "conversion", "from": "heat", "to": "mc", "rate": 1}
+        ]
+    },
+    {
+        "name": "Ecoline",
+        "mc": 36,
+        "expansion":"Base",
+        "effect": [
+            {"type": "production", "resource": "plants", "amount": 2},
+            {"type": "gain", "resource": "plants", "amount": 3}
+        ]
+    },
+  {
+    "name": "Inventrix",
+    "mc": 45,
+    "expansion": "Base",
+    "effect": [
+      {"type": "discount", "scope": "science", "amount": 2},
+      {"type": "production", "resource": "mc", "amount": 1}
+    ]
+  },
+  {
+    "name": "Mining Guild",
+    "mc": 30,
+    "expansion": "Base",
+    "effect": [
+      {"type": "production", "resource": "steel", "amount": 1},
+      {"type": "gain", "resource": "steel", "amount": 1}
+    ]
+  },
+  {
+    "name": "Valley Trust",
+    "mc": 50,
+    "expansion": "Prelude",
+    "effect": [
+      {"type": "gain", "resource": "mc", "amount": 10},
+      {"type": "draw", "amount": 1}
+    ]
+  },
+  {
+    "name": "Viron",
+    "mc": 48,
+    "expansion": "Prelude",
+    "effect": [
+      {"type": "gain", "resource": "energy", "amount": 2},
+      {"type": "production", "resource": "energy", "amount": 2}
+    ]
+  },
+  {
+    "name": "Point Luna",
+    "mc": 38,
+    "expansion": "Colonies",
+    "effect": [
+      {"type": "draw", "amount": 1},
+      {"type": "discount", "scope": "earth", "amount": 2}
+    ]
+  }
+  ],
   "standard_projects": [
     {
       "name":"Asteroid",
