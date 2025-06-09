@@ -1,175 +1,131 @@
 {
+  "standard_projects": [
+    {
+      "name":"Asteroid",
+      "cost": 14,
+      "type":"standard_project",
+      "expansion":"Base",
+      "effects": [
+        {"type":"global","target":"temperature","amount":1}
+      ]
+    },
+    {"name":"Power Plant",
+     "cost": 11,
+     "type":"standard_project",
+     "expansion":"Base",
+     "effects": [
+      {"type":"production","target":"energy","amount":1}
+     ]
+    },
+    {"name":"Aquifer",
+     "cost": 18,
+     "type":"standard_project",
+     "expansion":"Base",
+     "effects":[
+      {"type":"global","target":"ocean","amount":1}
+     ]
+    }
+  ],
   "cards": [
     {
       "name": "Comet",
       "cost": 21,
       "type": "event",
-      "tags": [
-        "space",
-        "event"
-      ],
+      "tags": ["space", "event"],
       "expansion": "Base",
       "requirements": {},
       "effects": [
-        {
-          "type": "global",
-          "target": "temperature",
-          "amount": 2
-        },
-        {
-          "type": "place_tile",
-          "tile": "ocean"
-        },
-        {
-          "type": "remove_plants",
-          "amount": 3
-        },
-        {
-          "type": "tr",
-          "amount": 1
-        }
+        {"type": "global", "target": "temperature", "amount": 2},
+        {"type": "place_tile", "tile": "ocean"},
+        {"type": "remove_plants", "amount": 3},
+        {"type": "tr", "amount": 1}
       ]
     },
     {
       "name": "Lichen",
       "cost": 7,
       "type": "automated",
-      "tags": [
-        "plant"
-      ],
+      "tags": ["plant"],
       "expansion": "Base",
-      "requirements": {
-        "oxygen_min": 4
-      },
+      "requirements": {"oxygen_min": 4},
       "effects": [
-        {
-          "type": "production",
-          "resource": "plants",
-          "amount": 1
-        }
+        {"type": "production", "resource": "plants", "amount": 1}
       ]
     },
     {
       "name": "Biolab",
       "cost": 13,
       "type": "automated",
-      "tags": [
-        "microbe",
-        "science"
-      ],
+      "tags": ["microbe", "science"],
       "expansion": "Prelude",
       "requirements": {},
       "effects": [
-        {
-          "type": "draw",
-          "amount": 1
-        },
-        {
-          "type": "production",
-          "resource": "plants",
-          "amount": 1
-        }
+        {"type": "draw", "amount": 1},
+        {"type": "production", "resource": "plants", "amount": 1}
       ]
     },
     {
       "name": "Self-Sufficient Settlement",
       "cost": 14,
       "type": "automated",
-      "tags": [
-        "building"
-      ],
+      "tags": ["building"],
       "expansion": "Prelude",
-      "requirements": {
-        "temperature_min": -20
-      },
+      "requirements": {"temperature_min": -20},
       "effects": [
-        {
-          "type": "place_tile",
-          "tile": "city"
-        },
-        {
-          "type": "production",
-          "resource": "energy",
-          "amount": 1
-        }
+        {"type": "place_tile", "tile": "city"},
+        {"type": "production", "resource": "energy", "amount": 1}
       ]
     },
     {
       "name": "Eccentric Orbit",
       "cost": 15,
       "type": "automated",
-      "tags": [
-        "space",
-        "venus"
-      ],
+      "tags": ["space", "venus"],
       "expansion": "Venus Next",
       "requirements": {},
       "effects": [
-        {
-          "type": "global",
-          "target": "venus",
-          "amount": 1
-        }
+        {"type": "global", "target": "venus", "amount": 1}
       ]
     },
     {
       "name": "GHG Import from Venus",
       "cost": 16,
       "type": "event",
-      "tags": [
-        "space",
-        "venus"
-      ],
+      "tags": ["space", "venus"],
       "expansion": "Venus Next",
       "requirements": {},
       "effects": [
-        {
-          "type": "production",
-          "resource": "heat",
-          "amount": 2
-        },
-        {
-          "type": "tr",
-          "amount": 1
-        }
+        {"type": "production", "resource": "heat", "amount": 2},
+        {"type": "tr", "amount": 1}
       ]
     },
     {
       "name": "Galilean Mining",
       "cost": 29,
       "type": "automated",
-      "tags": [
-        "jovian"
-      ],
+      "tags": ["jovian"],
       "expansion": "Colonies",
       "requirements": {},
       "effects": [
-        {
-          "type": "production",
-          "resource": "titanium",
-          "amount": 2
-        },
-        {
-          "type": "vp",
-          "amount": 1
-        }
+        {"type": "production", "resource": "titanium", "amount": 2},
+        {"type": "vp", "amount": 1}
       ]
     },
     {
       "name": "Colonial Fleet",
       "cost": 20,
       "type": "active",
-      "tags": [
-        "space",
-        "colony"
-      ],
+      "tags": ["space", "colony"],
       "expansion": "Colonies",
       "requirements": {},
       "effects": [
+        {"type": "trade_bonus", "resource": "titanium", "amount": 1}
+      ],
+      "active_effects": [
         {
-          "type": "trade_bonus",
-          "resource": "titanium",
-          "amount": 1
+          "trigger": "trade",
+          "effect": {"type": "gain", "resource": "titanium", "amount": 1},
+          "description": "When you trade, gain 1 titanium"
         }
       ]
     },
@@ -177,35 +133,538 @@
       "name": "Lobbying",
       "cost": 8,
       "type": "event",
-      "tags": [
-        "politics"
-      ],
+      "tags": ["politics"],
       "expansion": "Turmoil",
       "requirements": {},
       "effects": [
-        {
-          "type": "influence",
-          "party": "red",
-          "amount": 2
-        }
+        {"type": "influence", "party": "red", "amount": 2}
       ]
     },
     {
       "name": "Political Alliance",
       "cost": 10,
       "type": "automated",
-      "tags": [
-        "politics",
-        "earth"
-      ],
+      "tags": ["politics", "earth"],
       "expansion": "Turmoil",
       "requirements": {},
       "effects": [
+        {"type": "discount", "scope": "event", "amount": 3}
+      ]
+    },
+    {
+      "name": "Aquifer Pumping",
+      "cost": 18,
+      "type": "automated",
+      "tags": ["building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "place_tile", "tile": "ocean"},
+        {"type": "tr", "amount": 1}
+      ]
+    },
+    {
+      "name": "Artificial Lake",
+      "cost": 15,
+      "type": "automated",
+      "tags": ["building"],
+      "expansion": "Base",
+      "requirements": {"temperature_min": -6},
+      "effects": [
+        {"type": "place_tile", "tile": "ocean"},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Asteroid Mining",
+      "cost": 30,
+      "type": "automated",
+      "tags": ["space", "jovian"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "titanium", "amount": 2},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Bushes",
+      "cost": 10,
+      "type": "automated",
+      "tags": ["plant"],
+      "expansion": "Base",
+      "requirements": {"temperature_min": -10},
+      "effects": [
+        {"type": "production", "resource": "plants", "amount": 1},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Carbonate Processing",
+      "cost": 6,
+      "type": "automated",
+      "tags": ["building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "global", "target": "oxygen", "amount": 1}
+      ]
+    },
+    {
+      "name": "Deimos Down",
+      "cost": 31,
+      "type": "event",
+      "tags": ["space", "event"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "global", "target": "temperature", "amount": 3},
+        {"type": "tr", "amount": 2}
+      ]
+    },
+    {
+      "name": "Dust Seals",
+      "cost": 2,
+      "type": "automated",
+      "tags": [],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Electro Catapult",
+      "cost": 17,
+      "type": "automated",
+      "tags": ["building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "energy", "amount": -1},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Energy Saving",
+      "cost": 15,
+      "type": "automated",
+      "tags": ["power"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "energy", "amount": 1},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Fuel Factory",
+      "cost": 6,
+      "type": "automated",
+      "tags": ["building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "energy", "amount": -1},
+        {"type": "production", "resource": "mc", "amount": 1}
+      ]
+    },
+    {
+      "name": "Giant Ice Asteroid",
+      "cost": 36,
+      "type": "event",
+      "tags": ["space", "event"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "place_tile", "tile": "ocean"},
+        {"type": "global", "target": "temperature", "amount": 2}
+      ]
+    },
+    {
+      "name": "Grass",
+      "cost": 11,
+      "type": "automated",
+      "tags": ["plant"],
+      "expansion": "Base",
+      "requirements": {"temperature_min": -16},
+      "effects": [
+        {"type": "production", "resource": "plants", "amount": 1},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Great Dam",
+      "cost": 12,
+      "type": "automated",
+      "tags": ["power", "building"],
+      "expansion": "Base",
+      "requirements": {"oceans_min": 4},
+      "effects": [
+        {"type": "production", "resource": "energy", "amount": 2},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Greenhouses",
+      "cost": 6,
+      "type": "automated",
+      "tags": ["plant", "building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "plants", "amount": 1}
+      ]
+    },
+    {
+      "name": "Insulation",
+      "cost": 2,
+      "type": "automated",
+      "tags": [],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "heat", "amount": 1}
+      ]
+    },
+    {
+      "name": "Ironworks",
+      "cost": 11,
+      "type": "automated",
+      "tags": ["building"],
+      "expansion": "Base",
+      "requirements": {"oxygen_min": 6},
+      "effects": [
+        {"type": "production", "resource": "steel", "amount": 1},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Kelvinists",
+      "cost": 5,
+      "type": "automated",
+      "tags": ["politics"],
+      "expansion": "Turmoil",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "heat", "amount": 1},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Lake Marineris",
+      "cost": 18,
+      "type": "automated",
+      "tags": [],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "place_tile", "tile": "ocean"},
+        {"type": "vp", "amount": 2}
+      ]
+    },
+    {
+      "name": "Mangrove",
+      "cost": 12,
+      "type": "automated",
+      "tags": ["plant"],
+      "expansion": "Base",
+      "requirements": {"temperature_min": 4},
+      "effects": [
+        {"type": "place_tile", "tile": "greenery"},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Methane from Titan",
+      "cost": 28,
+      "type": "automated",
+      "tags": ["jovian", "space"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "heat", "amount": 2},
+        {"type": "vp", "amount": 2}
+      ]
+    },
+    {
+      "name": "Mining Expedition",
+      "cost": 12,
+      "type": "event",
+      "tags": ["space", "event"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "steel", "amount": 1},
+        {"type": "tr", "amount": 1}
+      ]
+    },
+    {
+      "name": "Nitrogen-Rich Asteroid",
+      "cost": 31,
+      "type": "event",
+      "tags": ["space", "event"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "global", "target": "temperature", "amount": 1},
+        {"type": "production", "resource": "plants", "amount": 1},
+        {"type": "tr", "amount": 2}
+      ]
+    },
+    {
+      "name": "Noctis City",
+      "cost": 18,
+      "type": "automated",
+      "tags": ["city", "building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "place_tile", "tile": "city"},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Nuclear Power",
+      "cost": 10,
+      "type": "automated",
+      "tags": ["power", "building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "energy", "amount": 2},
+        {"type": "production", "resource": "mc", "amount": -1}
+      ]
+    },
+    {
+      "name": "Olympus Conference",
+      "cost": 10,
+      "type": "active",
+      "tags": ["science", "politics"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "vp", "amount": 1}
+      ],
+      "active_effects": [
         {
-          "type": "discount",
-          "scope": "event",
-          "amount": 3
+          "trigger": "science_tag_played",
+          "effect": {"type": "draw", "amount": 1},
+          "description": "When you play a science tag, draw 1 card"
         }
+      ]
+    },
+    {
+      "name": "Permafrost Extraction",
+      "cost": 8,
+      "type": "automated",
+      "tags": [],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "place_tile", "tile": "ocean"}
+      ]
+    },
+    {
+      "name": "Power Plant",
+      "cost": 4,
+      "type": "automated",
+      "tags": ["power", "building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "energy", "amount": 1}
+      ]
+    },
+    {
+      "name": "Rad-Chem Factory",
+      "cost": 8,
+      "type": "automated",
+      "tags": ["building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Robotic Workforce",
+      "cost": 9,
+      "type": "automated",
+      "tags": ["science"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Sabotage",
+      "cost": 3,
+      "type": "event",
+      "tags": ["event"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "steal", "resource": "mc", "amount": 3}
+      ]
+    },
+    {
+      "name": "Satellites",
+      "cost": 10,
+      "type": "automated",
+      "tags": ["space"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Search for Life",
+      "cost": 3,
+      "type": "active",
+      "tags": ["science"],
+      "expansion": "Base",
+      "requirements": {"oxygen_max": 6},
+      "effects": [],
+      "active_effects": [
+        {
+          "trigger": "action",
+          "effect": {"type": "add_science", "amount": 1},
+          "description": "Action: Add 1 science resource to this card",
+          "limit": 3
+        },
+        {
+          "trigger": "game_end",
+          "condition": {"type": "has_resource", "resource": "science", "amount": 1},
+          "effect": {"type": "vp", "amount": 3},
+          "description": "If this card has at least 1 science resource, gain 3 VP"
+        }
+      ]
+    },
+    {
+      "name": "Security Fleet",
+      "cost": 12,
+      "type": "active",
+      "tags": ["space"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "vp", "amount": 1}
+      ],
+      "active_effects": [
+        {
+          "trigger": "earth_tag_played",
+          "effect": {"type": "gain", "resource": "titanium", "amount": 1},
+          "description": "When you play an Earth tag, gain 1 titanium"
+        }
+      ]
+    },
+    {
+      "name": "Solar Power",
+      "cost": 11,
+      "type": "automated",
+      "tags": ["power", "building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "energy", "amount": 1}
+      ]
+    },
+    {
+      "name": "Space Station",
+      "cost": 10,
+      "type": "automated",
+      "tags": ["space"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Strip Mine",
+      "cost": 25,
+      "type": "automated",
+      "tags": ["building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "steel", "amount": 2},
+        {"type": "production", "resource": "titanium", "amount": 1},
+        {"type": "production", "resource": "energy", "amount": -2},
+        {"type": "vp", "amount": 2}
+      ]
+    },
+    {
+      "name": "Tectonic Stress Power",
+      "cost": 18,
+      "type": "automated",
+      "tags": ["power", "building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "energy", "amount": 3},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Trees",
+      "cost": 13,
+      "type": "automated",
+      "tags": ["plant"],
+      "expansion": "Base",
+      "requirements": {"temperature_min": -4, "oxygen_min": 4},
+      "effects": [
+        {"type": "production", "resource": "plants", "amount": 1},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Urbanized Area",
+      "cost": 10,
+      "type": "automated",
+      "tags": ["city", "building"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "place_tile", "tile": "city"},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Vesta Shipyard",
+      "cost": 15,
+      "type": "automated",
+      "tags": ["space", "jovian"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "production", "resource": "titanium", "amount": 1},
+        {"type": "vp", "amount": 1}
+      ]
+    },
+    {
+      "name": "Water Import from Europa",
+      "cost": 25,
+      "type": "event",
+      "tags": ["space", "event"],
+      "expansion": "Base",
+      "requirements": {},
+      "effects": [
+        {"type": "place_tile", "tile": "ocean"}
+      ]
+    },
+    {
+      "name": "Zeppelins",
+      "cost": 7,
+      "type": "automated",
+      "tags": [],
+      "expansion": "Base",
+      "requirements": {"oxygen_min": 5},
+      "effects": [
+        {"type": "vp", "amount": 1}
       ]
     }
   ]

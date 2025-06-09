@@ -26,8 +26,10 @@ def load_cards(filepath="terraforming_mars_cards_full.json", expansions=None):
     cards = data.get("cards", [])
     if expansions:
         cards = [card for card in cards if card.get("expansion", "Base") in expansions]
-
-    return cards
+    standard_projects = data.get("standard_projects", [])
+    if expansions:
+        standard_projects = [card for card in standard_projects if card.get("expansion", "Base") in expansions]
+    return cards,standard_projects
 
 def filter_playable_cards(cards, player_state, global_params):
     """
@@ -66,6 +68,15 @@ class TerraformingMarsEnv(AECEnv):
         self.ocean_positions = {}
         self.render_callback = render_callback
         self.deck = []
+        all_cards,all_standard_projects=get_all_cards()
+        self.all_cards=all_cards
+        self.standard_projects=all_standard_projects
+        self.draft_phase = True
+        self.place_tile_phase = False
+        self.place_entity_phase=False
+        self.action_phase = False
+        self.draft_max_available=100
+        self.current_player_actions_left=2
         self.reset()
 
     def create_player(self):
@@ -80,7 +91,10 @@ class TerraformingMarsEnv(AECEnv):
             'played_cards': [],
             'hand': [],
             'vp': 0,
-            'terraform_rating': 20
+            'terraform_rating': 20,
+            'draft_hand': [],
+            'available_draft_cards':1000,
+            'available_free_draft_cards':0
         }
 
     def reset(self):
@@ -93,11 +107,17 @@ class TerraformingMarsEnv(AECEnv):
         self.ocean_positions = {(1, 1), (1, 7), (2, 3), (2, 5), (3, 1), (3, 7)}
         self.players = [self.create_player() for _ in range(self.num_players)]
         self.global_parameters = {'temperature': -30, 'oxygen': 0, 'oceans': 0}
-        self.deck = get_all_cards().copy()
+        self.deck = self.all_cards.copy()
+        self.draft_phase = True
+        self.place_tile_phase = False
+        self.place_entity_phase=False
+        self.action_phase = False
+        self.draft_max_available=100
+        self.current_player_actions_left=2
         random.shuffle(self.deck)
         print(f"Deck {self.deck}")
         for player in self.players:
-            player['hand'] = [self.deck.pop() for _ in range(4)]
+            player['draft_hand'] = [self.deck.pop() for _ in range(10)]
         self.done = False
         return self.observe()
 
@@ -114,17 +134,26 @@ class TerraformingMarsEnv(AECEnv):
         ], dtype=np.float32)
 
     def step(self, action):
+        print(f"Step triggered action={action}")
         player = self.players[self.current_player]
 
         if action == "pass":
             self.player_pass()
             return self.observe(), 0, False, {}
-
-        if isinstance(action, dict) and action.get('type') == 'draft_card':
-            return self.draft_card(action)
-
+        
         reward = self.handle_action(action)
-        self.next_turn()
+        if reward<0:
+            return self.observe(), reward, False, {}
+        action_type = action.get('type')
+        if action_type == "buy_card":
+            return self.observe(), reward, False, {}
+
+        if self.action_phase:
+            self.current_player_actions_left-=1    
+            if self.current_player_actions_left<=0:
+                self.next_turn()
+        else:
+            self.next_turn()
         self.update_front()
         return self.observe(), reward, False, {}
 
@@ -137,25 +166,20 @@ class TerraformingMarsEnv(AECEnv):
             return False
         if 'oxygen_min' in reqs and oxy < reqs['oxygen_min']:
             return False
-        if player['mc'] < card['cost']:
+        if player['mc'] < self.calc_card_cost(card):
             return False
+        if card['effects']:
+            for e in card['effects']:
+                if e['type']=='global' and self.global_parameters['oceans']+e['amount']>9:
+                    return False
         return True
-
-    def draft_card(self, action):
-        card = action['card']
-        player = self.players[self.current_player]
-        if card in player['hand'] and self.can_play_card(player, card):
-            player['hand'].remove(card)
-            player['played_cards'].append(card)
-            player['mc'] -= card['cost']
-            self.apply_card_effect(player, card)
-            return self.observe(), 1, False, {}
-        return self.observe(), -1, False, {}
+    
+    def calc_card_cost(self,card):
+        return card['cost']
 
     def apply_card_effect(self, player, card):
         for effect in card.get("effects", []):
             etype = effect.get("type")
-
             if etype == "global":
                 target = effect.get("target")
                 amount = effect.get("amount", 0)
@@ -190,8 +214,15 @@ class TerraformingMarsEnv(AECEnv):
 
     def next_turn(self):
         self.current_player = (self.current_player + 1) % self.num_players
+        if self.current_player==0 and self.draft_phase:
+            self.action_phase=True
+            self.draft_phase=False
+            for p in self.players:
+                p['draft_hand']=[]
         if len(self.passed_players) == self.num_players:
             self.end_generation()
+        print(f"End turn. Current player: {self.current_player}")
+        self.update_front()
 
     def player_pass(self):
         self.passed_players.add(self.current_player)
@@ -207,74 +238,95 @@ class TerraformingMarsEnv(AECEnv):
                 player[res] += player['production'].get(res, 0)
             player['mc'] += player['terraform_rating']
             if self.deck:
-                player['hand'].append(self.deck.pop())
+                for i in range(4):
+                    player['draft_hand'].append(self.deck.pop())
+            player['available_draft_cards']=100
+            player['available_free_draft_cards']=0
+        self.action_phase=False
+        self.draft_phase=True
+        
         self.current_player = 0
+        print(f"End generation done")
 
+    def handle_action_play_card(self,player,action):
+        name = action['card_name']
+        for card in player['hand']:
+            if card['name'] == name and self.can_play_card(player, card):
+                if card['type']!='standard_project':
+                    player['hand'].remove(card)
+                    player['played_cards'].append(card)
+                player['mc'] -= self.calc_card_cost(card=card)
+                self.apply_card_effect(player, card)
+                print(f"Played card {card}")
+                return 1
+        else:
+            return -1
+
+    def handle_action_place_tile(self,player,action):
+        tile_type = action['tile_type']
+        x, y = action['position']
+        if not (0 <= x < self.map_width and 0 <= y < self.map_height):
+            return -1
+
+        tile = self.tiles[y][x]
+        if tile['type'] != 'empty':
+            return -1
+        if tile_type == 'city':
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if 0 <= y+dy < self.map_height and 0 <= x+dx < self.map_width:
+                        if self.tiles[y+dy][x+dx]['type'] == 'city':
+                            return -1
+            self.tiles[y][x] = {'type': tile_type, 'owner': self.current_player}
+            player['terraform_rating'] += 1
+            return 1
+        if tile_type == 'ocean' and (y, x) not in self.ocean_positions:
+            return -1
+        self.tiles[y][x] = {'type': tile_type, 'owner': self.current_player}
+        if tile_type in ['city', 'greenery', 'ocean']:
+            player['terraform_rating'] += 1
+        return 1
+    
+    def handle_action_buy_card(self, player, action):
+        if not self.draft_phase:
+            return -1
+
+        if player['available_draft_cards']<1:
+            return -1
+        if player['available_free_draft_cards']>0:
+            player['available_free_draft_cards']-=1
+        else:
+            if player['mc'] < 4:
+                return -1
+            player['mc'] -= 4
+        name = action['card_name']
+        for card in player['draft_hand']:
+            if card['name'] == name:
+                player['hand'].append(card)
+                player['draft_hand'].remove(card)
+                return 1
+        return 1
+    
     def handle_action(self, action):
         player = self.players[self.current_player]
         reward = 0
         action_type = action.get('type')
+        print(f"Handle action started, type={action_type}")
 
-        if action_type == 'standard_project':
-            name = action['name']
-            if name == 'asteroid' and player['mc'] >= 14:
-                player['mc'] -= 14
-                self.global_parameters['temperature'] += 2
-                player['terraform_rating'] += 1
-                reward = 1
-            elif name == 'power_plant' and player['mc'] >= 11:
-                player['mc'] -= 11
-                player['production']['energy'] += 1
-                reward = 1
-            elif name == 'aquifer' and player['mc'] >= 18:
-                player['mc'] -= 18
-                self.global_parameters['oceans'] += 1
-                player['terraform_rating'] += 1
-                reward = 1
-            else:
-                reward = -1
-
-        elif action_type == 'play_card':
-            name = action['card_name']
-            for card in player['hand']:
-                if card['name'] == name and self.can_play_card(player, card):
-                    player['hand'].remove(card)
-                    player['played_cards'].append(card)
-                    player['mc'] -= card['cost']
-                    self.apply_card_effect(player, card)
-                    reward = 1
-                    break
-            else:
-                reward = -1
-
+        if action_type == 'play_card':
+            reward=self.handle_action_play_card(player,action)
         elif action_type == 'place_tile':
-            tile_type = action['tile_type']
-            x, y = action['position']
-            if not (0 <= x < self.map_width and 0 <= y < self.map_height):
-                reward = -1
-            else:
-                tile = self.tiles[y][x]
-                if tile['type'] != 'empty':
-                    reward = -1
-                elif tile_type == 'city':
-                    for dx in [-1, 0, 1]:
-                        for dy in [-1, 0, 1]:
-                            if 0 <= y+dy < self.map_height and 0 <= x+dx < self.map_width:
-                                if self.tiles[y+dy][x+dx]['type'] == 'city':
-                                    return -1
-                    self.tiles[y][x] = {'type': tile_type, 'owner': self.current_player}
-                    player['terraform_rating'] += 1
-                    reward = 1
-                elif tile_type == 'ocean' and (y, x) not in self.ocean_positions:
-                    reward = -1
-                else:
-                    self.tiles[y][x] = {'type': tile_type, 'owner': self.current_player}
-                    if tile_type in ['city', 'greenery', 'ocean']:
-                        player['terraform_rating'] += 1
-                    reward = 1
+            reward=self.handle_action_place_tile(player,action)
+        elif action_type == 'buy_card':
+            reward=self.handle_action_buy_card(player,action)
+            print(f"Buy card done, reward={reward}")
+        elif action_type == 'end_turn':
+            pass
         else:
             reward = -1
-
+        if reward<0:
+            print(f"Invalid action: {action} by Player {self.current_player + 1}")
+        print(f"Handle action done, type={action_type}, reward={reward}")
         return reward
 
     def update_front(self):
