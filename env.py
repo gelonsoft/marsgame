@@ -44,16 +44,6 @@ class GamePhase(enum.Enum):
     last_actions=11
 
 def load_cards(filepath="terraforming_mars_cards_full.json", expansions=None):
-    """
-    Load card data from a JSON file and filter by expansions if provided.
-
-    Args:
-        filepath (str): Path to JSON file containing card data.
-        expansions (list or None): Filter by expansions (e.g., ["Base", "Prelude"]).
-
-    Returns:
-        list of dict: Card entries
-    """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Card file not found: {filepath}")
 
@@ -70,6 +60,14 @@ def load_cards(filepath="terraforming_mars_cards_full.json", expansions=None):
     if expansions:
         corporations = [card for card in corporations if card.get("expansion", "Base") in expansions]
     return cards,standard_projects,corporations
+
+def load_maps(filepath="terraforming_mars_maps.json"):
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"Card file not found: {filepath}")
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("maps")
 
 def filter_playable_cards(cards, player_state, global_params):
     """
@@ -99,13 +97,13 @@ def get_all_cards():
 class TerraformingMarsEnv(AECEnv):
     def __init__(self, num_players=2, render_callback=None,seed=42):
         super().__init__()
+        self.all_maps=load_maps()
+        self.map=[]
         self.num_players = num_players
-        self.players = [self.create_player() for _ in range(num_players)]
+        self.players = []
         self.current_player = 0
         self.passed_players = set()
         self.generation = 1
-        self.tiles = []
-        self.ocean_positions = {}
         self.render_callback = render_callback
         self.deck = []
         self.phase=GamePhase.choose_corp
@@ -155,12 +153,7 @@ class TerraformingMarsEnv(AECEnv):
         self.first_player=int(random.Random(self.seed).random()*self.num_players)
         self.current_player = self.first_player
         self.passed_players = set()
-        self.map_width = 9
-        self.map_height = 5
-        self.tiles = [[{'type': 'empty', 'owner': None} for _ in range(self.map_width)] for _ in range(self.map_height)]
-        self.ocean_positions = {(1, 1), (1, 7), (2, 3), (2, 5), (3, 1), (3, 7)}
-        for op in self.ocean_positions:
-            self.tiles[op[0]][op[1]]['type']='ocean_area'
+        self.map=self.all_maps[int(random.Random(self.seed).random()*len(self.all_maps))]['tiles'].copy()
         self.players = [self.create_player() for _ in range(self.num_players)]
         self.corporations=self.all_corporations.copy()
         random.Random(self.seed).shuffle(self.corporations)
@@ -212,9 +205,11 @@ class TerraformingMarsEnv(AECEnv):
             'funded_awards':[]
         }
 
-
-
-
+    def get_map_tile_by_coord(self,x,y):
+        for t in self.map:
+            if t['x']==x and t['y']==y:
+                return t
+        return None
     def observe(self):
         player = self.players[self.current_player]
         return np.array([
@@ -373,7 +368,7 @@ class TerraformingMarsEnv(AECEnv):
             for award in self.funded_awards:
                 # Simplified scoring — award 5 VP to most qualifying player
                 if award == "Landlord":
-                    tiles = sum(row.count({'type': 'city', 'owner': i}) for row in self.tiles)
+                    tiles = sum([1 for tile in self.map if tile['type']=='city' and tile['owner']==i])
                     award_vp += 5 if tiles >= 2 else 0
                 elif award == "Banker":
                     if player['production'].get('mc', 0) >= 4:
@@ -411,8 +406,11 @@ class TerraformingMarsEnv(AECEnv):
             return False
         if card['effects']:
             for e in card['effects']:
-                if e['type']=='global' and self.global_parameters['oceans']+e['amount']>9:
-                    return False
+                if e['type']=="production" and e['amount']<0:
+                    if e['resource']=='mc' and player['production'][e['resource']]+e['amount']<-5:
+                        return False
+                    elif e['resource']!='mc' and player['production'][e['resource']]+e['amount']<0:
+                        return False
         if card['name'] in player['played_active_cards_in_round'].keys():
             return False
         return True
@@ -446,15 +444,11 @@ class TerraformingMarsEnv(AECEnv):
         elif etype == "conversion":
             player['conversion'] = effect
 
-    def add_global_parameter(self,player,parameter_name,amount):
+    def add_global_parameter(self,player,parameter_name):
         if parameter_name=='temperature':
             if self.global_parameters[parameter_name]+2<=8:
                 player['terraform_rating']+=1
                 self.global_parameters[parameter_name]+=2
-        elif parameter_name=='oceans':
-            if self.global_parameters[parameter_name]+2<=9:
-                player['terraform_rating']+=1
-                self.global_parameters[parameter_name]+=1
         elif parameter_name=='oxygen':
             if self.global_parameters[parameter_name]+2<=14:
                 player['terraform_rating']+=1
@@ -467,7 +461,8 @@ class TerraformingMarsEnv(AECEnv):
             if etype == "global":
                 target = effect.get("target")
                 amount = effect.get("amount", 0)
-                self.add_global_parameter(player,target,amount)
+                for i in range(amount):
+                    self.add_global_parameter(player,target)
 
             elif etype == "tr":
                 player['terraform_rating'] += effect.get("amount", 0)
@@ -478,6 +473,11 @@ class TerraformingMarsEnv(AECEnv):
                 if resource in player['production']:
                     player['production'][resource] += amount
 
+            elif etype == "resource":
+                resource = effect.get("resource")
+                amount = effect.get("amount", 0)
+                if resource in player:
+                    player[resource] += amount
             elif etype == "draw" and self.deck:
                 for _ in range(effect.get("amount", 1)):
                     if self.deck:
@@ -564,24 +564,29 @@ class TerraformingMarsEnv(AECEnv):
     def handle_action_place_tile(self,player,action):
         tile_type = action['tile_type']
         x, y = action['position']
-        if not (0 <= x < self.map_width and 0 <= y < self.map_height):
+        tile = self.get_map_tile_by_coord(x,y)
+        if not tile:
             return -1
-
-        tile = self.tiles[y][x]
-        if tile_type == 'city' and tile['type'] != 'empty':
+        if tile_type == 'city' and tile['type'] == 'empty':
             for dx in [-1, 0, 1]:
                 for dy in [-1, 0, 1]:
-                    if 0 <= y+dy < self.map_height and 0 <= x+dx < self.map_width:
-                        if self.tiles[y+dy][x+dx]['type'] == 'city':
-                            return -1
-            self.tiles[y][x] = {'type': tile_type, 'owner': self.current_player}
-            player['terraform_rating'] += 1
-            return 1
-        if tile_type == 'ocean' and (y, x) not in self.ocean_positions:
+                    test_tile=self.get_map_tile_by_coord(x+dx,y+dy)
+                    if test_tile and test_tile['type']=='city':
+                        return -1
+        if tile_type == 'ocean' and tile['type']!='ocean_area':
             return -1
-        self.tiles[y][x] = {'type': tile_type, 'owner': self.current_player}
-        if tile_type in ['city', 'greenery', 'ocean']:
+        tile['type']=tile_type
+        tile['owner']=self.current_player
+        if tile_type=='greenery':
+            self.add_global_parameter(player,'oxygen')
+        if tile_type=='ocean':
             player['terraform_rating'] += 1
+        for r in tile.get('resources',[]):
+            if r['resource'] in player:
+                player[r['resource']]+=r['amount']
+            elif r['resource']=='draw':
+                for _ in r['amount']:
+                    player['hand'].append(self.get_card_from_deck())
         if action['id']:
             action_id=action['id']
             self.deffered_player_actions=list( filter(lambda x: x['id'] != action_id, self.deffered_player_actions) )

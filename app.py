@@ -28,13 +28,22 @@ player = env.players[env.current_player]
 #🌍 Terraforming Mars Web UI
 st.markdown(f"### Generation: {env.generation} | Current Player: Player {env.current_player + 1} | Actions: {env.current_player_actions_left}")
 st.markdown(f"Phase: A={env.phase}")
-
+# === Global Parameters ===
+st.subheader("🌐 Global Parameters")
+col1,col2,col3 = st.columns(3)
+with col1:
+    st.text(f"Temperature: {env.global_parameters['temperature']}°C")
+with col2:
+    st.text(f"Oxygen: {env.global_parameters['oxygen']}%")
+with col3:
+    st.text(f"Oceans: {env.global_parameters['oceans']}/9")
 card_icons = {
     'Comet': '☄️',
     'Lichen': '🌿',
     'Nuclear Zone': '💥'
 }
 
+# === Player Dashboard ===
 def draw_player(player,player_id,is_current_player):
     if is_current_player:
         st.subheader(f"Current player")
@@ -46,7 +55,6 @@ def draw_player(player,player_id,is_current_player):
     st.text(f"Steel: {player['steel']} | Titanium: {player['titanium']} | Energy: {player['energy']}")
     st.markdown(f"**Production:** {player['production']}")
 
-# === Player Dashboard ===
 pcols = st.columns(env.num_players)
 with pcols[0]:
     someplayer=player
@@ -60,15 +68,7 @@ for i in range(env.num_players-1):
         draw_player(player=env.players[j],player_id=j,is_current_player=False)
         
 
-# === Global Parameters ===
-st.subheader("🌐 Global Parameters")
-col1,col2,col3 = st.columns(3)
-with col1:
-    st.text(f"Temperature: {env.global_parameters['temperature']}°C")
-with col2:
-    st.text(f"Oxygen: {env.global_parameters['oxygen']}%")
-with col3:
-    st.text(f"Oceans: {env.global_parameters['oceans']}/9")
+
 
 
 def render_card(card):
@@ -107,37 +107,45 @@ if env.draft_phase:  # Only show for human player
 # === Milestones ====
 if not st.session_state.place_tile:
     st.subheader("🏁 Milestones")
-    claimed = getattr(env, 'claimed_milestones', [])
+    claimed = env.claimed_milestones
+    cols=st.columns(len(env.milestones))
+    i=0
     for name, condition in env.milestones.items():
-        claimed_by_any = name in claimed
-        eligible = condition(player)
-        if claimed_by_any:
-            st.markdown(f"- ✅ {name} (claimed)")
-        elif eligible and player['mc'] >= 8 and env.action_phase:
-            if st.button(f"Claim Milestone: {name}"):
-                env.step({"type": "claim_milestone", "name": name})
-                st.rerun()
-        elif env.action_phase:
-            st.markdown(f"- ❌ {name} (not eligible or already claimed)")
-        else:
-            st.markdown(f"- 💰 {name}")
+        with cols[i]:
+            i+=1
+            claimed_by_any = name in claimed
+            eligible = condition(player)
+            if claimed_by_any:
+                st.markdown(f"- ✅ {name} (claimed)")
+            elif eligible and player['mc'] >= 8 and env.action_phase:
+                if st.button(f"Claim Milestone: {name}"):
+                    env.step({"type": "claim_milestone", "name": name})
+                    st.rerun()
+            elif env.action_phase:
+                st.markdown(f"- ❌ {name} (not eligible or already claimed)")
+            else:
+                st.markdown(f"- 💰 {name}")
 
 # === Awards ====
 if not st.session_state.place_tile:
     st.subheader("🎯 Awards")
-    funded = getattr(env, 'funded_awards', [])
+    funded = env.funded_awards
+    cols=st.columns(len(env.awards))
+    i=0
     for name in env.awards:
-        funded_by_any = name in funded
-        if funded_by_any:
-            st.markdown(f"- 💰 {name} (funded)")
-        elif player['mc'] >= 8 and env.action_phase:
-            if st.button(f"Fund Award: {name}"):
-                env.step({"type": "fund_award", "name": name})
-                st.rerun()
-        elif env.action_phase:
-            st.markdown(f"- ❌ {name} (not enough MC or already funded)")
-        else:
-            st.markdown(f"- 💰 {name}")
+        with cols[i]:
+            i=i+1
+            funded_by_any = name in funded
+            if funded_by_any:
+                st.markdown(f"- 💰 {name} (funded)")
+            elif player['mc'] >= 8 and env.action_phase:
+                if st.button(f"Fund Award: {name}"):
+                    env.step({"type": "fund_award", "name": name})
+                    st.rerun()
+            elif env.action_phase:
+                st.markdown(f"- ❌ {name} (not enough MC or already funded)")
+            else:
+                st.markdown(f"- 💰 {name}")
 
 # === Deffered actions ===
 if env.deffered_actions_phase and not st.session_state.place_tile:
@@ -152,9 +160,11 @@ if env.deffered_actions_phase and not st.session_state.place_tile:
 # === Standard Projects ===
 if env.action_phase and not st.session_state.place_tile:
     st.markdown("#### Standard Projects")
-    for card in env.standard_projects:
-        playable = env.can_play_card(player, card)
-        if playable:
+    playable_standard_projects=[p for p in env.standard_projects if env.can_play_card(player, p)]
+    cols=st.columns(len(playable_standard_projects))
+    for i in range(len(playable_standard_projects)):
+        with cols[i]:
+            card=playable_standard_projects[i]
             render_card(card)
             if st.button(card['name']):
                 action = {'type': 'play_card', 'card_name': card['name']}
@@ -225,15 +235,12 @@ if not env.choose_corporation_phase:
 
     HEX_RADIUS = 2
     HEX_HEIGHT = np.sqrt(3) * HEX_RADIUS
-    NUM_ROWS = 5
-    NUM_COLS = 9
 
     hex_centers = []
-    for row in range(NUM_ROWS):
-        for col in range(NUM_COLS):
-            y = col * 1.5 * HEX_RADIUS
-            x = row * HEX_HEIGHT + (HEX_HEIGHT / 2 if col % 2 else 0)
-            hex_centers.append((x, y, row, col))
+    for tile in env.map:
+            y = tile['x'] * 1.5 * HEX_RADIUS
+            x = tile['y'] * HEX_HEIGHT + (HEX_HEIGHT / 2 if tile['x'] % 2 else 0)
+            hex_centers.append((x, y, tile['y'], tile['x']))
 
     def hexagon(x_center, y_center, radius):
         angle_offset = np.pi / 6
@@ -261,7 +268,7 @@ if not env.choose_corporation_phase:
         xs += (xs[0],)
         ys += (ys[0],)
 
-        tile = env.tiles[row][col]
+        tile = env.get_map_tile_by_coord(col,row)
         if row==0 and col==0:
             print(f"Render tile={tile}")
         color = {
@@ -284,12 +291,17 @@ if not env.choose_corporation_phase:
             customdata=[(row, col)] * len(xs),
             showlegend=False
         ))
-
+        fig_text=f"{row},{col}|"
+        for r in tile.get('resources',[]):
+            fig_text+=f"{r['resource'][0]}{r['amount']}"
+        if tile.get('special'):
+            fig_text+=tile.get('special')[0]
+        #fig_text=fig_text[:-1]
         fig.add_trace(go.Scatter(
             x=[x],
             y=[y],
             mode='text',
-            text=[f"{row},{col}"],
+            text=[fig_text],
             customdata=[(row, col)],
             showlegend=False
         ))

@@ -613,6 +613,7 @@
     {
       "name": "Search for Life",
       "cost": 3,
+      "number":"#005",
       "type": "active",
       "tags": ["science"],
       "expansion": "Base",
@@ -621,8 +622,8 @@
       "active_effects": [
         {
           "trigger": "action",
-          "effect": {"type": "add_science", "amount": 1},
-          "description": "Action: Add 1 science resource to this card",
+          "effect": {"type": "check_card", "amount": 1,"good_tag":"microbe"},
+          "description": "Action: Spend 1 MC reveal the top card of the draw deck",
           "limit": 3
         },
         {
@@ -631,7 +632,8 @@
           "effect": {"type": "vp", "amount": 3},
           "description": "If this card has at least 1 science resource, gain 3 VP"
         }
-      ]
+      ],
+      "description":"(Action: Spend 1 MC to reveal the top card of the draw deck. If that card has a Microbe tag, add a Science resource here.)\n\n (3 VPs if you have one or more Science resources here.)"
     },
     {
       "name": "Security Fleet",
