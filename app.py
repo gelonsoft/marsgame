@@ -17,6 +17,7 @@ def rerun_callback():
 if 'env' not in st.session_state:
     print("init")
     st.session_state.env = TerraformingMarsEnv(num_players=2,render_callback=rerun_callback )
+    st.session_state.place_tile=None
     st.session_state.env.reset()
 
 env = st.session_state.env
@@ -24,9 +25,9 @@ current_player = env.players[env.current_player]
 player = env.players[env.current_player]
 
 # === Header ===
-st.title(f"🌍 Terraforming Mars Web UI")
+#🌍 Terraforming Mars Web UI
 st.markdown(f"### Generation: {env.generation} | Current Player: Player {env.current_player + 1} | Actions: {env.current_player_actions_left}")
-st.markdown(f"Phase: A={env.action_phase},D={env.draft_phase}")
+st.markdown(f"Phase: A={env.phase}")
 
 card_icons = {
     'Comet': '☄️',
@@ -34,20 +35,50 @@ card_icons = {
     'Nuclear Zone': '💥'
 }
 
+def draw_player(player,player_id,is_current_player):
+    if is_current_player:
+        st.subheader(f"Current player")
+    else:
+        st.subheader(f"Player #{player_id+1}")
+    if player.get('corporation'):
+        st.markdown(f"**Corporation:** 🏢 {player['corporation']}")
+    st.text(f"TR: {player['terraform_rating']} | MC: {player['mc']} | Heat: {player['heat']} | Plants: {player['plants']}")
+    st.text(f"Steel: {player['steel']} | Titanium: {player['titanium']} | Energy: {player['energy']}")
+    st.markdown(f"**Production:** {player['production']}")
+
 # === Player Dashboard ===
-if player.get('corporation'):
-    st.markdown(f"**Corporation:** 🏢 {player['corporation']}")
-st.subheader("📊 Player Resources")
-st.text(f"TR: {player['terraform_rating']} | MC: {player['mc']} | Heat: {player['heat']} | Plants: {player['plants']}")
-st.text(f"Steel: {player['steel']} | Titanium: {player['titanium']} | Energy: {player['energy']}")
-st.markdown(f"**Production:** {player['production']}")
+pcols = st.columns(env.num_players)
+with pcols[0]:
+    someplayer=player
+    draw_player(player=player,player_id=env.current_player,is_current_player=True)
+
+for i in range(env.num_players-1):
+    j=0
+    if j==env.current_player:
+        j+=1
+    with pcols[i+1]:
+        draw_player(player=env.players[j],player_id=j,is_current_player=False)
+        
 
 # === Global Parameters ===
 st.subheader("🌐 Global Parameters")
-st.text(f"Temperature: {env.global_parameters['temperature']}°C")
-st.text(f"Oxygen: {env.global_parameters['oxygen']}%")
-st.text(f"Oceans: {env.global_parameters['oceans']}/9")
+col1,col2,col3 = st.columns(3)
+with col1:
+    st.text(f"Temperature: {env.global_parameters['temperature']}°C")
+with col2:
+    st.text(f"Oxygen: {env.global_parameters['oxygen']}%")
+with col3:
+    st.text(f"Oceans: {env.global_parameters['oceans']}/9")
 
+
+def render_card(card):
+    effect_text=f"\n- Effect: `{card.get('effects'),[]}`" if len(card.get('effects',[]))>0 else ""
+    tags_text=f"\n- Tags: {', '.join(card.get('tags', []))}" if len(card.get('tags',[]))>0 else ""
+    active_effect_text=f"\n- Active effects: `{card.get('active_effects',[])}`" if len(card.get('active_effects',[]))>0 else ""
+    card_info = f"""**{card['name']}**:  
+- Cost: {card['cost']} MC {effect_text}{active_effect_text}{tags_text}"""
+    st.markdown(card_info)
+# === Corporation choice ====
 if env.choose_corporation_phase:
     st.subheader("🏢 Choose Corporation")
     for corp in player['corporation_choices']:
@@ -64,11 +95,7 @@ if env.draft_phase:  # Only show for human player
     st.subheader("🃏 Draft Phase - Select 1 Card to Keep")
 
     for card in player['draft_hand']:
-            card_info = f"""**{card['name']}** ({card['type']})  
-    Cost: {card['cost']} MC  
-    Effect: `{card['effects']}`  
-    Tags: {', '.join(card.get('tags', []))}"""
-            st.markdown(card_info)
+            render_card(card)
             if st.button(f"Buy {card['name']}"):
                 env.step({'type': 'buy_card', 'card_name': card['name']})
                 st.rerun()
@@ -77,49 +104,58 @@ if env.draft_phase:  # Only show for human player
         print("End draft")
         env.step({"type":"end_turn"})
 
-st.subheader("🏁 Milestones")
-claimed = getattr(env, 'claimed_milestones', [])
-for name, condition in env.milestones.items():
-    claimed_by_any = name in claimed
-    eligible = condition(player)
-    if claimed_by_any:
-        st.markdown(f"- ✅ {name} (claimed)")
-    elif eligible and player['mc'] >= 8 and env.action_phase:
-        if st.button(f"Claim Milestone: {name}"):
-            env.step({"type": "claim_milestone", "name": name})
-            st.rerun()
-    elif env.action_phase:
-        st.markdown(f"- ❌ {name} (not eligible or already claimed)")
-    else:
-        st.markdown(f"- 💰 {name}")
+# === Milestones ====
+if not st.session_state.place_tile:
+    st.subheader("🏁 Milestones")
+    claimed = getattr(env, 'claimed_milestones', [])
+    for name, condition in env.milestones.items():
+        claimed_by_any = name in claimed
+        eligible = condition(player)
+        if claimed_by_any:
+            st.markdown(f"- ✅ {name} (claimed)")
+        elif eligible and player['mc'] >= 8 and env.action_phase:
+            if st.button(f"Claim Milestone: {name}"):
+                env.step({"type": "claim_milestone", "name": name})
+                st.rerun()
+        elif env.action_phase:
+            st.markdown(f"- ❌ {name} (not eligible or already claimed)")
+        else:
+            st.markdown(f"- 💰 {name}")
 
-st.subheader("🎯 Awards")
-funded = getattr(env, 'funded_awards', [])
-for name in env.awards:
-    funded_by_any = name in funded
-    if funded_by_any:
-        st.markdown(f"- 💰 {name} (funded)")
-    elif player['mc'] >= 8 and env.action_phase:
-        if st.button(f"Fund Award: {name}"):
-            env.step({"type": "fund_award", "name": name})
-            st.rerun()
-    elif env.action_phase:
-        st.markdown(f"- ❌ {name} (not enough MC or already funded)")
-    else:
-        st.markdown(f"- 💰 {name}")
-        
-# --- Standard Projects ---
-if env.action_phase:
+# === Awards ====
+if not st.session_state.place_tile:
+    st.subheader("🎯 Awards")
+    funded = getattr(env, 'funded_awards', [])
+    for name in env.awards:
+        funded_by_any = name in funded
+        if funded_by_any:
+            st.markdown(f"- 💰 {name} (funded)")
+        elif player['mc'] >= 8 and env.action_phase:
+            if st.button(f"Fund Award: {name}"):
+                env.step({"type": "fund_award", "name": name})
+                st.rerun()
+        elif env.action_phase:
+            st.markdown(f"- ❌ {name} (not enough MC or already funded)")
+        else:
+            st.markdown(f"- 💰 {name}")
+
+# === Deffered actions ===
+if env.deffered_actions_phase and not st.session_state.place_tile:
+    st.markdown("#### Active Actions")
+    for a in env.deffered_player_actions:
+        if a['type']=="place_tile":
+            if st.button(f"Place {a['tile']} tile"):
+                st.session_state.place_tile=a
+                st.rerun()
+                
+
+# === Standard Projects ===
+if env.action_phase and not st.session_state.place_tile:
     st.markdown("#### Standard Projects")
     for card in env.standard_projects:
         playable = env.can_play_card(player, card)
         if playable:
-            card_info = f"""**{card['name']}**  
-    Cost: {card['cost']} MC  
-    Effect: `{card['effects']}`  
-
-    Tags: {', '.join(card.get('tags', []))}"""
-            st.markdown(card_info)
+            render_card(card)
             if st.button(card['name']):
                 action = {'type': 'play_card', 'card_name': card['name']}
                 env.step(action)      
@@ -132,11 +168,7 @@ if not env.choose_corporation_phase:
     else:
         for card in player['hand']:
             playable = env.can_play_card(player, card)
-            card_info = f"""**{card['name']}**  
-    Cost: {card['cost']} MC  
-    Effect: `{card['effects']}`  
-    Tags: {', '.join(card.get('tags', []))}"""
-            st.markdown(card_info)
+            render_card(card)
             if env.action_phase:
                 if playable:
                     if st.button(f"Play {card['name']}"):
@@ -152,9 +184,7 @@ if not env.choose_corporation_phase:
         if card.get('type') != 'active':
             continue
 
-        card_info = f"**{card['name']}**  \
-        Tags: {', '.join(card.get('tags', []))}"
-        st.markdown(card_info)
+        render_card(card)
 
         # Show resource counters if present
         resources = card.get('resources', {})
@@ -179,20 +209,19 @@ if not env.choose_corporation_phase:
         for card in player['played_cards']:
             if card.get('type') == 'active':
                 continue
-            effects_preview = ", ".join(
-                f"{e['type']}({e.get('target', e.get('resource', e.get('tile', e.get('scope', ''))))}: {e.get('amount', '')})"
-                for e in card.get("effects", [])
-            )
-            st.markdown(f"- **{card['name']}** ({card['type']}) [{', '.join(card.get('tags', []))}] → {effects_preview}")
+            render_card(card)
 
 # === Tile Type Selector ===
 #tile_type = st.radio("Select Tile Type to Place:", ["greenery", "city", "ocean"], horizontal=True)
 # === Interactive Hex Grid ===
 
-@st.fragment
-def render_tm():
+#@st.fragment
+
+if not env.choose_corporation_phase:
     print("Render TM")
-    st.markdown("### 🗺️ Terraforming Mars - Click to Place Tile")
+    st.markdown("### 🗺️ Terraforming Mars")
+    if st.session_state.place_tile:
+        st.markdown(f"## Place tile {st.session_state.place_tile['tile']}")
 
     HEX_RADIUS = 2
     HEX_HEIGHT = np.sqrt(3) * HEX_RADIUS
@@ -216,8 +245,7 @@ def render_tm():
             for i in range(6)
         ]
 
-
-    fig = go.Figure(layout=dict(    title="Terraforming Mars - Hex Grid",
+    fig = go.Figure(layout=dict(   title="Terraforming Mars - Hex Grid",
         xaxis=dict(showgrid=False, zeroline=False, visible=False),
         yaxis=dict(showgrid=False, zeroline=False, visible=False),
         margin=dict(l=10, r=10, t=40, b=10),
@@ -240,7 +268,8 @@ def render_tm():
             'empty': 'lightgray',
             'greenery': 'green',
             'city': 'blue',
-            'ocean': 'aqua'
+            'ocean': 'aqua',
+            'ocean_area': 'teal'
         }.get(tile['type'], 'gray')
 
         fig.add_trace(go.Scatter(
@@ -266,7 +295,7 @@ def render_tm():
         ))
 
     fig.layout.template = None # to slim down the output
-
+    
     #fig.update_layout(
     #    title="Terraforming Mars - Hex Grid",
     #    xaxis=dict(showgrid=False, zeroline=False, visible=False),
@@ -278,21 +307,25 @@ def render_tm():
     #)
 
     #Clear figure 
-
-
-
-
-    if env.place_entity_phase:
-        #st.plotly_chart(fig, use_container_width=True)
-        selected_points = plotly_events(fig,select_event=False,click_event=True,hover_event=False)
-
+    if not st.session_state.place_tile:
+        st.plotly_chart(fig)
+    
+    #st.plotly_chart(fig, use_container_width=True)
+    if st.session_state.place_tile:
+        print("Place tile active, activating events")
+        action=st.session_state.place_tile
+        selected_points = plotly_events(fig,select_event=False,click_event=True,hover_event=False,key=action['id'])
+        fig.update_layout(
+            height=700
+        )
+        tile_type=action['tile']
         # === Placement Logic ===
         if selected_points:
-            print(selected_points)
+            print(f"Selected points: {selected_points}")
             #print(fig.data[selected_points[0]["curveNumber"]])
             row, col = fig.data[selected_points[0]["curveNumber"]]['customdata'][0] #selected_points[0]['customdata']
             
-            observe,reward,done,info = env.step({'type': 'place_tile', 'tile_type': tile_type, 'position': (col, row)})
+            observe,reward,done,info = env.step({'type': 'place_tile', 'tile_type': tile_type, 'position': (col, row),'id':action['id']})
             print(f"observe={observe} reward={reward} done={done} info={info}")
 
             if reward == -1:
@@ -300,9 +333,12 @@ def render_tm():
             else:
                 st.success(f"Placed {tile_type} at ({row}, {col})! +1 TR")
                 selected_points=None
-                st.rerun(scope="fragment")
+                print(f"Set place_tile to None")
+                st.session_state.place_tile=None
+                print(f"Set place_tile to None done")
+                st.rerun()
                 
-render_tm()
+#render_tm()
 
 #st.plotly_chart(fig, use_container_width=True)
 
@@ -310,8 +346,10 @@ render_tm()
 col1, col2 = st.columns(2)
 
 if env.action_phase:
-    if col1.button("➡️ End Turn"):
-        env.current_player = (env.current_player + 1) % env.num_players
+    if env.current_player_actions_left<2:
+        if col1.button("➡️ End Turn"):
+            env.step({"type":"end_turn"})
+            #env.current_player = (env.current_player + 1) % env.num_players
     if st.button("🚫 Pass Turn"):
         env.step("pass")
 
