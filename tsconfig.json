@@ -1,0 +1,29 @@
+{
+    "compilerOptions": {
+        "lib": ["dom", "es2021"],
+        "incremental": true,
+        "module": "commonjs",
+        "strict": true,
+        "noImplicitAny": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "removeComments": true,
+        "preserveConstEnums": true,
+        "skipLibCheck": true,
+        "target": "es2021",
+        "types": ["node"],
+        "moduleResolution": "node",
+        "resolveJsonModule": true,
+        "allowUnreachableCode": false,
+        "baseUrl": ".",
+        "paths": {
+            "@/*": ["./*"]
+        }
+
+    },
+    "include": [
+        "**/gs*.ts",
+    ],
+}
