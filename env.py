@@ -1,46 +1,86 @@
+import traceback
 import numpy as np
 import json
 import gymnasium as gym
 from gymnasium import spaces
 from pettingzoo import AECEnv
-from pettingzoo.utils import agent_selector
+from pettingzoo.utils import AgentSelector
 from typing import List, Dict
 from observe_function import observe  # assuming observe() is defined in another module
 import requests
 import random
+from decision_mapper import TerraformingMarsDecisionMapper
+import logging
+
+logging.basicConfig(level=logging.WARNING)  # Set the logging level to DEBUG
+
+
+
+
 
 SERVER_BASE_URL="http://localhost:9976"
 
-MAX_ACTIONS = 20  # Must match observe()
+MAX_ACTIONS = 100000  # Must match observe()
+
+request_number=0
+request_responses={}
+USE_MOCK_SERVER=False
+if USE_MOCK_SERVER:
+    with open("response.json","rb") as f:
+        request_responses=json.loads(f.read())
+
 
 def get_player_state(player_id):
     url = f"{SERVER_BASE_URL}/api/player"
-    print(f"get_player_state {player_id}")
+    logging.debug(f"get_player_state {player_id}")
+    global request_responses,request_number
+    if USE_MOCK_SERVER:
+        response=request_responses[str(request_number)]["response"]
+        logging.debug(f"Request url={url} {player_id} request_mock={request_responses[str(request_number)]['request']}")
+        request_number+=1
+        return response
     response = requests.get(url,params={"id":player_id},headers={"content-type":"application/json"})
     response.raise_for_status()
     try:
-        return response.json()
+        response_json=response.json()
+        request_responses[request_number]={"request":response.request.url,"method":"get","response":response_json}
+        request_number+=1
+        return response_json
     except Exception as e:
-        print(f"Bad get_player_state response:\n{response.text}")
+        logging.error(f"Bad get_player_state response:\n{response.text}")
         raise e
 
-def post_player_input(game_id,player_id, player_input_model):
+def post_player_input(run_id,player_id, player_input_model):
     url = f"{SERVER_BASE_URL}/player/input"
-    print(f"post_player_input Request:---\n{json.dumps(player_input_model)}\n---\n")
-    player_input_model['runId']=game_id
+    logging.debug(f"post_player_input Request:---\n{json.dumps(player_input_model)}\n---\n")
+    player_input_model['runId']=run_id
+    global request_responses,request_number
+    if USE_MOCK_SERVER:
+        response=request_responses[str(request_number)]["response"]
+        logging.debug(f"Request url={url} {player_id} request_mock={request_responses[str(request_number)]['request']}")
+        request_number+=1
+        return response
     response = requests.post(url, params={"id":player_id}, json=player_input_model)
-    response.raise_for_status()
     try:
+        response.raise_for_status()
         resp=response.json()
-        print(f"Response: post_player_input\n---\n{resp}\n---")
+        request_responses[request_number]={"request":response.request.url,"method":"get","response":resp}
+        request_number+=1
+        logging.debug(f"Response: post_player_input\n---\n{resp}\n---")
         return resp
     except Exception as e:
-        print(f"Bad post_player_input response:\n{response.text}")
+        logging.error(f"Bad post_player_input response:\n{response.text}")
         raise e
 
 def start_new_game(num_players):
-    print("Start new game")
+    logging.info("Start new game")
     url = f"{SERVER_BASE_URL}/api/creategame"
+    global request_responses,request_number
+    if USE_MOCK_SERVER:
+        response=request_responses[str(request_number)]["response"]
+        logging.debug(f"Request url={url} {num_players} request_mock={request_responses[str(request_number)]['request']}")
+        request_number+=1
+        return response
     response = requests.put(url, json={
     "players": [
         {
@@ -112,7 +152,10 @@ def start_new_game(num_players):
     "startingPreludes": 4
 })
     response.raise_for_status()
-    return response.json()
+    response_json=response.json()
+    request_responses[str(request_number)]={"request":response.request.url,"method":"get","response":response_json}
+    request_number+=1
+    return response_json
 
 
 class TerraformingMarsEnv(AECEnv):
@@ -120,13 +163,15 @@ class TerraformingMarsEnv(AECEnv):
 
     def __init__(self, agent_ids: List[str]):
         super().__init__()
+        self.decision_mapper=TerraformingMarsDecisionMapper(None)
         self.game_id=None
+        #self.run_id=None
         self.spectator_id=None
         self.player_name_to_id={}
         self.agent_id_to_player_id={}
         self.possible_agents = agent_ids
         self.agents = self.possible_agents[:]
-        self._agent_selector = agent_selector(self.agents)
+        self._agent_selector = AgentSelector(self.agents)
         self.action_spaces = {}
         self.agent_selection = self._agent_selector.reset()
         self.dones = {agent: False for agent in self.agents}
@@ -159,41 +204,12 @@ class TerraformingMarsEnv(AECEnv):
             self.current_obs[agent] = observe(None, json_str)
 
             waiting_input = self.player_states[agent].get("waitingFor")
-            action_map = {}
-
-            if isinstance(waiting_input, dict) and "options" in waiting_input:
-                options = waiting_input["options"]
-                input_type = waiting_input.get("type")
-
-                if input_type == "initialCards":
-                    from itertools import combinations
-                    max_comb = min(len(options), MAX_ACTIONS)
-                    combo_index = 0
-                    for r in range(1, max_comb + 1):
-                        for combo in combinations(options, r):
-                            if combo_index < MAX_ACTIONS:
-                                action_map[combo_index] = {
-                                    "type": input_type,
-                                    "responses": [{"type": "card", "cards": list(combo)}]
-                                }
-                                combo_index += 1
-                            else:
-                                break
-                elif input_type in ["standardProject", "action", "tile", "milestone", "award"]:
-                    for i, option in enumerate(options[:MAX_ACTIONS]):
-                        response = {"type": input_type}
-                        if isinstance(option, dict):
-                            response.update(option)
-                        elif isinstance(option, str):
-                            response["choice"] = option
-                        action_map[i] = response
-                else:
-                    for i, option in enumerate(options[:MAX_ACTIONS]):
-                        action_map[i] = {"type": input_type, "choice": option}
-
-            elif isinstance(waiting_input, dict):
-                action_map[0] = waiting_input
-
+            if waiting_input is not None and len(waiting_input) > 0:
+                action_map = self.decision_mapper.generate_action_space(waiting_input)  # Initialize the action map
+                #print(f"Waiting actions ofr {agent}: \n{json.dumps(waiting_input,indent=2)}")
+            else:
+                action_map={}
+            #print(f"Action map: \n{json.dumps(action_map,indent=2)}")
             self.legal_actions[agent] = list(action_map.keys())[:MAX_ACTIONS]
             self.action_lookup[agent] = {i: action_map[i] for i in self.legal_actions[agent]}
             self.reverse_action_lookup[agent] = action_map
@@ -205,10 +221,11 @@ class TerraformingMarsEnv(AECEnv):
 
     def reset(self, seed=None, options=None):
         self.agents = self.possible_agents[:]
-        self._agent_selector = agent_selector(self.agents)
+        self._agent_selector = AgentSelector(self.agents)
         self.agent_selection = self._agent_selector.reset()
         new_game_response=start_new_game(len(self.agents))
         self.game_id=new_game_response['id']
+        #self.run_id=new_game_response['runId']
         self.spectator_id=new_game_response['spectatorId']
         self.player_name_to_id={}
         self.agent_id_to_player_id={}
@@ -225,7 +242,7 @@ class TerraformingMarsEnv(AECEnv):
         self._update_all_observations()
 
     def post_player_input(self,agent_id,player_input):
-        post_player_input(self.game_id,self.agent_id_to_player_id[agent_id],player_input)
+        return post_player_input(self.player_states[agent_id]['runId'],self.agent_id_to_player_id[agent_id],player_input)
 
     def step(self, action):
         agent = self.agent_selection
@@ -236,7 +253,7 @@ class TerraformingMarsEnv(AECEnv):
 
         player_input = self.action_lookup[agent].get(action)
         if player_input:
-            print(f"[DEBUG] Agent {agent} selected input: {json.dumps(player_input, indent=2)}")
+            logging.debug(f"Agent {agent} selected input: {json.dumps(player_input, indent=2)}")
             self.post_player_input(agent, player_input)
 
         self._update_all_observations()
@@ -250,7 +267,7 @@ class TerraformingMarsEnv(AECEnv):
             self.agents = []
 
     def render(self):
-        print("Rendering not implemented")
+        logging.debug("Rendering not implemented")
 
     def close(self):
         pass 
@@ -261,6 +278,9 @@ if __name__ == '__main__':
     print(f"Agents and players: {env.agent_id_to_player_id}")
     print(f"Spectator id: {env.spectator_id}")
     print(f"Game id: {env.game_id}")
-    print(f"Actions: {json.dumps(env.action_lookup,indent=4)}")
+    #print(f"Actions: {json.dumps(env.action_lookup,indent=4)}")
     print(f"Observes: {env.current_obs}")
     env.step(1)
+    if not USE_MOCK_SERVER:
+        with open('response.json', 'w') as f:
+            f.write(json.dumps(request_responses,indent=2))

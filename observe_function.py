@@ -1,6 +1,13 @@
 import numpy as np
 import json
 from pettingzoo import AECEnv
+from jsonpath_ng.ext import parse
+
+with open("gs.schema.formatted.json",'rb') as f:
+#with open("gs.response.schema.lite.json",'rb') as f:
+    json_schema=json.loads(f.read())
+
+CARDS=parse('$.definitions..CardName.enum').find(json_schema)[0].value
 
 # Define a helper function to safely get nested values with a default
 def get_nested(d, keys, default=0):
@@ -54,6 +61,9 @@ PARTY_ENCODING = {
     "Reds": 4,
     "Greens": 5
 }
+
+CARDS_ENCODING={card: i for i, card in enumerate(CARDS)}
+
 
 # Maximum number of available actions to encode (pad or truncate to this size)
 MAX_ACTIONS = 20
