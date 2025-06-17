@@ -3,15 +3,14 @@ from typing import Dict, Any, List
 from collections import defaultdict
 import json
 from jsonpath_ng.ext import parse
-from myconfig import MAX_ACTIONS
+from myconfig import MAX_ACTIONS,ONE_ACTION_ARRAY_SIZE,MAX_GAME_FEATURES_SIZE
 
 with open("gs.schema.formatted.json",'rb') as f:
 #with open("gs.response.schema.lite.json",'rb') as f:
     json_schema=json.loads(f.read())
 
 ALL_CARD_NAMES=parse('$.definitions..CardName.enum').find(json_schema)[0].value
-ONE_ACTION_ARRAY_SIZE=1024
-MAX_GAME_FEATURES_SIZE=10240
+
 
 # Helper functions
 def normalize(value, min_val, max_val):

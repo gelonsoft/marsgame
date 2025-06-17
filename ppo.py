@@ -1,14 +1,22 @@
+import os
+import time
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from torch.optim.lr_scheduler import StepLR
+from torch.utils.tensorboard import SummaryWriter
 
 #from pettingzoo.butterfly import pistonball_v6
 
 from env import parallel_env
 
+continue_train=os.getenv('CONTINUE_TRAIN', 'False') == 'True'
+model_path=os.getenv('MODEL_PATH', 'ppo_model.pt') 
+run_name=os.getenv('RUN_NAME', 'default_run')
+writer = SummaryWriter(f"runs/{run_name}")
+start_time = time.time()
 
 class Agent(nn.Module):
     def __init__(self, obs_size,num_actions):
@@ -79,11 +87,12 @@ if __name__ == "__main__":
     vf_coef = 0.1
     clip_coef = 0.1
     gamma = 0.99
-    batch_size = 32
+    batch_size = int(os.getenv('BATCH_SIZE', "32"))
     #stack_size = 4
     #frame_size = (64, 64)
-    max_cycles = 100
-    total_episodes = 100
+    max_cycles = int(os.getenv('MAX_CYCLES', "100"))
+    total_episodes = int(os.getenv('TOTAL_EPISODES', "100"))
+
     
 
     """ ENV SETUP """
@@ -97,8 +106,16 @@ if __name__ == "__main__":
 
     """ LEARNER SETUP """
     print(f"Num actions is {num_actions} space={num_actions}")
-    agent = Agent(obs_size=observation_size[0],num_actions=num_actions).to(device)
+    agent = Agent(obs_size=observation_size[0],num_actions=num_actions)
     optimizer = optim.Adam(agent.parameters(), lr=0.001, eps=1e-5)
+    if continue_train:
+        checkpoint=torch.load(model_path)
+        agent.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+    agent.to(device)
+    
+    
     scheduler = StepLR(optimizer, step_size=30,gamma=0.1)
     """ ALGO LOGIC: EPISODE STORAGE"""
     end_step = 0
@@ -134,6 +151,8 @@ if __name__ == "__main__":
                 next_obs, rewards, terms, truncs, infos = env.step(
                     unbatchify(actions, env)
                 )
+                for agent in env.agents:
+                    writer.add_scalar(f"charts/train-player{agent}", episode, rewards[agent])
                 
                 #print(f"Next obs: {next_obs}")
 
@@ -250,6 +269,16 @@ if __name__ == "__main__":
         print(f"Clip Fraction: {np.mean(clip_fracs)}")
         print(f"Explained Variance: {explained_var.item()}")
         print("\n-------------------------------------------\n")
+        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], episode)
+        writer.add_scalar("losses/value_loss", v_loss.item(), episode)
+        writer.add_scalar("losses/policy_loss", pg_loss.item(), episode)
+        writer.add_scalar("losses/entropy", entropy_loss.item(), episode)
+        writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), episode)
+        writer.add_scalar("losses/approx_kl", approx_kl.item(), episode)
+        writer.add_scalar("losses/explained_variance", explained_var, episode)
+        print("SPS:", int(episode / (time.time() - start_time)))
+        writer.add_scalar("charts/SPS", int(episode / (time.time() - start_time)), episode)
+        
 
     """ RENDER THE POLICY """
     env = parallel_env()
@@ -270,10 +299,17 @@ if __name__ == "__main__":
                 actions, logprobs, _, values = agent.get_action_and_value(obs)
                 #print(f"Agent eval step: actions={actions}")
                 obs, rewards, terms, truncs, infos = env.step(unbatchify(actions, env))
+                for agent in env.agents:
+                    writer.add_scalar(f"charts/eval-player{agent}", episode, rewards[agent])
                 obs = batchify_obs(obs, device)
                 terms = [terms[a] for a in terms]
                 truncs = [truncs[a] for a in truncs]
                 if any(terms) and any(truncs):
                     print("Termination or truncation detected. Ending episode.")
                     break
+    
     scheduler.step()
+    torch.save({"model_state_dict":agent.state_dict(), "optimizer_state_dict": optimizer.state_dict()}, f"runs/{run_name}/model_{episode}.pt")
+    print(f"Model saved at runs/{run_name}/model_{episode}.pt")
+
+writer.close()
