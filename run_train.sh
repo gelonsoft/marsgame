@@ -19,5 +19,5 @@ if [ -z "${RUN_NAME}" ]; then
     RUN_NAME=""
 
 docker run --name tms-bot-train -v $(pwd):/data -e SERVER_BASE_URL="${SERVER_BASE_URL}" \
-  -e START_LR="${START_LR}" -e CONTINUE_TRAIN="${CONTINUE_TRAIN}" -e MODEL_PATH="${MODEL_PATH}" -e RUN_NAME="${RUN_NAME}" \
-   terraforming-mars-bot:latest  python3 ppo.py
+ -e START_LR="${START_LR}" -e CONTINUE_TRAIN="${CONTINUE_TRAIN}" -e MODEL_PATH="${MODEL_PATH}" -e RUN_NAME="${RUN_NAME}" \
+ terraforming-mars-bot:latest  python3 ppo.py
