@@ -1,18 +1,21 @@
+from time import sleep
 import traceback
 import numpy as np
 import json
 import gymnasium as gym
 from gymnasium import spaces
-from pettingzoo import AECEnv
+from pettingzoo import AECEnv, ParallelEnv
 from pettingzoo.utils import AgentSelector
 from typing import List, Dict
-from observe_function import observe  # assuming observe() is defined in another module
+from myconfig import MAX_ACTIONS
+from observe_gamestate import get_actions_shape, observe  # assuming observe() is defined in another module
 import requests
 import random
 from decision_mapper import TerraformingMarsDecisionMapper
 import logging
+import os
 
-logging.basicConfig(level=logging.WARNING)  # Set the logging level to DEBUG
+logging.basicConfig(level=logging.INFO)  # Set the logging level to DEBUG
 
 
 
@@ -20,7 +23,7 @@ logging.basicConfig(level=logging.WARNING)  # Set the logging level to DEBUG
 
 SERVER_BASE_URL="http://localhost:9976"
 
-MAX_ACTIONS = 100000  # Must match observe()
+
 
 request_number=0
 request_responses={}
@@ -45,6 +48,9 @@ def get_player_state(player_id):
         response_json=response.json()
         request_responses[request_number]={"request":response.request.url,"method":"get","response":response_json}
         request_number+=1
+        with open(os.path.join("debug",f"{request_number}.json"),"w") as f:
+            f.write(json.dumps(response_json,indent=2))
+        #logging.debug(f"Request url={url} {player_id} response:\n{json.dumps(response_json,indent=2)}")
         return response_json
     except Exception as e:
         logging.error(f"Bad get_player_state response:\n{response.text}")
@@ -73,7 +79,7 @@ def post_player_input(run_id,player_id, player_input_model):
         raise e
 
 def start_new_game(num_players):
-    logging.info("Start new game")
+    
     url = f"{SERVER_BASE_URL}/api/creategame"
     global request_responses,request_number
     if USE_MOCK_SERVER:
@@ -155,11 +161,12 @@ def start_new_game(num_players):
     response_json=response.json()
     request_responses[str(request_number)]={"request":response.request.url,"method":"get","response":response_json}
     request_number+=1
+    logging.info(f"Started new game {SERVER_BASE_URL}/spectator?id={response_json['spectatorId']}")
     return response_json
 
 
-class TerraformingMarsEnv(AECEnv):
-    metadata = {"render_modes": ["human"], "name": "terraforming_mars_aec_v0"}
+class TerraformingMarsEnv(ParallelEnv):
+    metadata = {"render_modes": ["human"], "name": "terraforming_mars_aec_v0","is_parallelizable":True}
 
     def __init__(self, agent_ids: List[str]):
         super().__init__()
@@ -181,13 +188,21 @@ class TerraformingMarsEnv(AECEnv):
         self.action_lookup = {}
         self.reverse_action_lookup = {}  # For debugging
         self.observation_shape=None
+        self.render_mode='human'
+        self.terminations= {agent: False for agent in self.agents}
+        self.truncations = {agent: False for agent in self.agents}
         self.reset()
         #self.player_states = {agent: get_player_state(self.agent_id_to_player_id[agent]) for agent in self.agents}
-        sample_obs = observe(None, json.dumps(self.player_states[self.agents[0]]))
+        sample_obs = self.current_obs[self.agents[0]] #observe(self.player_states[self.agents[0]],self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor")))
         self.observation_shape = sample_obs.shape
+        self.action_shape=get_actions_shape()
 
         self.observation_spaces = {
             agent: spaces.Box(low=0.0, high=1.0, shape=self.observation_shape, dtype=np.float32)
+            for agent in self.agents
+        }
+        self.action_spaces = {
+            agent: spaces.Box(low=0.0, high=1.0, shape=self.action_shape, dtype=np.float32)
             for agent in self.agents
         }
 
@@ -200,15 +215,8 @@ class TerraformingMarsEnv(AECEnv):
         self.action_spaces = {}
         for agent in self.agents:
             self.player_states[agent] = get_player_state(self.agent_id_to_player_id[agent])
-            json_str = json.dumps(self.player_states[agent])
-            self.current_obs[agent] = observe(None, json_str)
-
-            waiting_input = self.player_states[agent].get("waitingFor")
-            if waiting_input is not None and len(waiting_input) > 0:
-                action_map = self.decision_mapper.generate_action_space(waiting_input)  # Initialize the action map
-                #print(f"Waiting actions ofr {agent}: \n{json.dumps(waiting_input,indent=2)}")
-            else:
-                action_map={}
+            action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"))  # Initialize the action map
+            self.current_obs[agent] = observe(self.player_states[agent],action_map)
             #print(f"Action map: \n{json.dumps(action_map,indent=2)}")
             self.legal_actions[agent] = list(action_map.keys())[:MAX_ACTIONS]
             self.action_lookup[agent] = {i: action_map[i] for i in self.legal_actions[agent]}
@@ -240,47 +248,63 @@ class TerraformingMarsEnv(AECEnv):
             self.infos[agent] = {}
 
         self._update_all_observations()
+        return self.current_obs,self.infos
+
 
     def post_player_input(self,agent_id,player_input):
         return post_player_input(self.player_states[agent_id]['runId'],self.agent_id_to_player_id[agent_id],player_input)
 
-    def step(self, action):
-        agent = self.agent_selection
-
-        if self.dones[agent]:
-            self.agent_selection = self._agent_selector.next()
-            return
-
-        player_input = self.action_lookup[agent].get(action)
-        if player_input:
-            logging.debug(f"Agent {agent} selected input: {json.dumps(player_input, indent=2)}")
-            self.post_player_input(agent, player_input)
+    #action= {'1': 2774, '2': 6487}
+    def step(self, actions):
+        for agent in actions:
+            action=actions[agent]
+            #print(f"Action: {action}")
+            player_input = self.action_lookup[agent].get(action)
+            if player_input:
+                logging.info(f"Agent {agent} selected input: {player_input.get('type')}")
+                self.post_player_input(agent, player_input)
+            self.rewards[agent] = 1.0 if player_input else -1.0
+            self.dones[agent] = True
 
         self._update_all_observations()
 
         # Placeholder reward logic
-        self.rewards[agent] = 1.0 if player_input else 0.0
-        self.dones[agent] = True
 
-        self.agent_selection = self._agent_selector.next()
-        if all(self.dones.values()):
-            self.agents = []
+        #if all(self.dones.values()):
+        #    self.agents = []
+        #obs, rewards, terminations, truncations, infos
+        print(f"Executing step... rewards={self.rewards} actions: {actions} of {[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]}")
+        return self.current_obs,self.rewards,self.terminations,self.truncations, self.infos
 
-    def render(self):
+    def render(self,render_mode):
         logging.debug("Rendering not implemented")
 
     def close(self):
         pass 
+    def observation_space(self, agent):
+        return self.observation_spaces[agent]
 
+    def action_space(self, agent):
+        return self.action_spaces[agent]
+    
+
+def parallel_env():
+    return TerraformingMarsEnv(['1','2'])
 
 if __name__ == '__main__':
     env=TerraformingMarsEnv(["1","2"])
     print(f"Agents and players: {env.agent_id_to_player_id}")
-    print(f"Spectator id: {env.spectator_id}")
+    print(f"Spectator id: {SERVER_BASE_URL}/spectator?id={env.spectator_id}")
     print(f"Game id: {env.game_id}")
     #print(f"Actions: {json.dumps(env.action_lookup,indent=4)}")
     print(f"Observes: {env.current_obs}")
+    print(f"Observes len: {len(env.current_obs['1'])}")
+    sleep(10)
     env.step(1)
+    sleep(10)
+    env.step(2)
+    sleep(10)
+    #http://localhost:9976/spectator?id=se97c54ea92af
     if not USE_MOCK_SERVER:
         with open('response.json', 'w') as f:
             f.write(json.dumps(request_responses,indent=2))

@@ -58,6 +58,9 @@ class TerraformingMarsDecisionMapper:
         return mapping_functions[input_type](player_input)
     
     def generate_action_space(self, player_input: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
+        
+        if player_input is None:
+            return {}
         """
         Generates all possible action combinations for a given PlayerInputModel.
         
