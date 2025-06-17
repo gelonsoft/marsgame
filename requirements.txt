@@ -1,0 +1,4 @@
+torch[cpu]
+jsonpath_ng
+gymnasium
+pettingzoo
