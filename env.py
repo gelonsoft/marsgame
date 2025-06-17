@@ -5,7 +5,7 @@ import json
 import gymnasium as gym
 from gymnasium import spaces
 from pettingzoo import AECEnv, ParallelEnv
-from pettingzoo.utils import AgentSelector
+from pettingzoo.utils import agent_selector
 from typing import List, Dict
 from myconfig import MAX_ACTIONS
 from observe_gamestate import get_actions_shape, observe  # assuming observe() is defined in another module
@@ -17,13 +17,7 @@ import os
 
 logging.basicConfig(level=logging.INFO)  # Set the logging level to DEBUG
 
-
-
-
-
-SERVER_BASE_URL="http://localhost:9976"
-
-
+SERVER_BASE_URL=os.environ.get('SERVER_BASE_URL',"http://localhost:9976")
 
 request_number=0
 request_responses={}
@@ -31,6 +25,8 @@ USE_MOCK_SERVER=False
 if USE_MOCK_SERVER:
     with open("response.json","rb") as f:
         request_responses=json.loads(f.read())
+        
+LOG_REQUESTS=False
 
 
 def get_player_state(player_id):
@@ -46,7 +42,8 @@ def get_player_state(player_id):
     response.raise_for_status()
     try:
         response_json=response.json()
-        request_responses[request_number]={"request":response.request.url,"method":"get","response":response_json}
+        if LOG_REQUESTS:
+            request_responses[request_number]={"request":response.request.url,"method":"get","response":response_json}
         request_number+=1
         with open(os.path.join("debug",f"{request_number}.json"),"w") as f:
             f.write(json.dumps(response_json,indent=2))
@@ -70,7 +67,8 @@ def post_player_input(run_id,player_id, player_input_model):
     try:
         response.raise_for_status()
         resp=response.json()
-        request_responses[request_number]={"request":response.request.url,"method":"get","response":resp}
+        if LOG_REQUESTS:
+            request_responses[request_number]={"request":response.request.url,"method":"get","response":resp}
         request_number+=1
         logging.debug(f"Response: post_player_input\n---\n{resp}\n---")
         return resp
@@ -159,7 +157,8 @@ def start_new_game(num_players):
 })
     response.raise_for_status()
     response_json=response.json()
-    request_responses[str(request_number)]={"request":response.request.url,"method":"get","response":response_json}
+    if LOG_REQUESTS:
+        request_responses[str(request_number)]={"request":response.request.url,"method":"get","response":response_json}
     request_number+=1
     logging.info(f"Started new game {SERVER_BASE_URL}/spectator?id={response_json['spectatorId']}")
     return response_json
@@ -178,7 +177,7 @@ class TerraformingMarsEnv(ParallelEnv):
         self.agent_id_to_player_id={}
         self.possible_agents = agent_ids
         self.agents = self.possible_agents[:]
-        self._agent_selector = AgentSelector(self.agents)
+        self._agent_selector = agent_selector(self.agents)
         self.action_spaces = {}
         self.agent_selection = self._agent_selector.reset()
         self.dones = {agent: False for agent in self.agents}
@@ -305,6 +304,6 @@ if __name__ == '__main__':
     env.step(2)
     sleep(10)
     #http://localhost:9976/spectator?id=se97c54ea92af
-    if not USE_MOCK_SERVER:
+    if not USE_MOCK_SERVER and LOG_REQUESTS:
         with open('response.json', 'w') as f:
             f.write(json.dumps(request_responses,indent=2))
