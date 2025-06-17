@@ -228,7 +228,7 @@ class TerraformingMarsEnv(ParallelEnv):
 
     def reset(self, seed=None, options=None):
         self.agents = self.possible_agents[:]
-        self._agent_selector = AgentSelector(self.agents)
+        self._agent_selector = agent_selector(self.agents)
         self.agent_selection = self._agent_selector.reset()
         new_game_response=start_new_game(len(self.agents))
         self.game_id=new_game_response['id']
