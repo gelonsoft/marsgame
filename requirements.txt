@@ -3,3 +3,5 @@ jsonpath_ng
 gymnasium
 pettingzoo
 requests
+tensorboard
+imghdr

@@ -151,8 +151,8 @@ if __name__ == "__main__":
                 next_obs, rewards, terms, truncs, infos = env.step(
                     unbatchify(actions, env)
                 )
-                for agent in env.agents:
-                    writer.add_scalar(f"charts/train-player{agent}", episode, rewards[agent])
+                for agent_id in env.agents:
+                    writer.add_scalar(f"charts/train-player{agent_id}", episode, rewards[agent_id])
                 
                 #print(f"Next obs: {next_obs}")
 
@@ -299,8 +299,8 @@ if __name__ == "__main__":
                 actions, logprobs, _, values = agent.get_action_and_value(obs)
                 #print(f"Agent eval step: actions={actions}")
                 obs, rewards, terms, truncs, infos = env.step(unbatchify(actions, env))
-                for agent in env.agents:
-                    writer.add_scalar(f"charts/eval-player{agent}", episode, rewards[agent])
+                for agent_id in env.agents:
+                    writer.add_scalar(f"charts/eval-player{agent_id}", episode, rewards[agent_id])
                 obs = batchify_obs(obs, device)
                 terms = [terms[a] for a in terms]
                 truncs = [truncs[a] for a in truncs]
