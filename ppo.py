@@ -1,3 +1,4 @@
+import glob
 import os
 import random
 import string
@@ -16,10 +17,37 @@ from env import parallel_env
 
 continue_train=os.getenv('CONTINUE_TRAIN', 'False') == 'True'
 model_path=os.getenv('MODEL_PATH', 'ppo_model.pt') 
-run_name=os.getenv('RUN_NAME', ''.join(random.choices(string.ascii_uppercase + string.digits, k=12)))
+run_name=os.getenv('RUN_NAME', '')
+if run_name=="":
+    run_name=''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
+batch_size = int(os.getenv('BATCH_SIZE', "32"))
+max_cycles = int(os.getenv('MAX_CYCLES', "100"))
+total_episodes = int(os.getenv('TOTAL_EPISODES', "1000"))
 start_lr=float(os.getenv('START_LR', 0.001))
+save_last_n=int(os.getenv('SAVE_LAST_N', 5))
+save_interval=int(os.getenv('SAVE_INTERVAL', 5))
+
+print("=== Parameters ====")
+print(f"CONTINUE_TRAIN: {continue_train}")
+print(f"MODEL_PATH: {model_path}")
+print(f"RUN_NAME: {run_name}")
+print(f"START_LR: {start_lr}")
+print(f"BATCH_SIZE: {batch_size}")
+print(f"MAX_CYCLES: {max_cycles}")
+print(f"TOTAL_EPISODES: {total_episodes}")
+print(f"SAVE_LAST_N: {save_last_n}")
+print(f"SAVE_INTERVAL: {save_interval}")
+print("====================")
+
 
 writer = SummaryWriter(f"runs/{run_name}")
+
+writer.add_text(
+    "hyperparameters",
+    "|param|value|\n|-|-|\n|CONTINUE_TRAIN|{continue_train}|\n|MODEL_PATH|{model_path}|\n|RUN_NAME|{run_name}|\n|START_LR|{start_lr}|\n|BATCH_SIZE|{batch_size}|\n|MAX_CYCLES|{max_cycles}|\n|TOTAL_EPISODES|{total_episodes}|\n|SAVE_LAST_N|{save_last_n}|\n|SAVE_INTERVAL|{save_interval}|"
+)
+
+
 start_time = time.time()
 
 class Agent(nn.Module):
@@ -91,11 +119,7 @@ if __name__ == "__main__":
     vf_coef = 0.1
     clip_coef = 0.1
     gamma = 0.99
-    batch_size = int(os.getenv('BATCH_SIZE', "32"))
-    #stack_size = 4
-    #frame_size = (64, 64)
-    max_cycles = int(os.getenv('MAX_CYCLES', "100"))
-    total_episodes = int(os.getenv('TOTAL_EPISODES', "100"))
+
 
     
 
@@ -116,6 +140,7 @@ if __name__ == "__main__":
         checkpoint=torch.load(model_path)
         agent.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        print(f"Loaded model from {model_path}")
 
     agent.to(device)
     
@@ -283,10 +308,15 @@ if __name__ == "__main__":
         print("SPS:", int(episode / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(episode / (time.time() - start_time)), episode)
         
-        
-        torch.save({"model_state_dict":agent.state_dict(), "optimizer_state_dict": optimizer.state_dict()}, f"runs/{run_name}/model_{episode}.pt")
-        print(f"Model saved at runs/{run_name}/model_{episode}.pt")
-
+        if episode % save_interval == 0: 
+            torch.save({"model_state_dict":agent.state_dict(), "optimizer_state_dict": optimizer.state_dict()}, f"runs/{run_name}/model_{episode}.pt")
+            print(f"Model saved at runs/{run_name}/model_{episode}.pt")
+            model_files=glob.glob(f"runs/{run_name}/model_*.pt")
+            if len(model_files) > save_last_n:
+                model_files.sort(key=os.path.getmtime)
+                os.remove(model_files[0])           
+                print(f"Removed oldest model file {model_files[0]} to keep {save_last_n} models")
+                      
     """ RENDER THE POLICY """
     env = parallel_env()
     #env = color_reduction_v0(env)
