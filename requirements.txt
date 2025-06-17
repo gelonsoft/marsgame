@@ -4,4 +4,3 @@ gymnasium
 pettingzoo
 requests
 tensorboard
-imghdr
