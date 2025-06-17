@@ -3,6 +3,7 @@ RUN apt-get update
 RUN pip install --upgrade pip
 RUN mkdir -p /data
 WORKDIR /data
+RUN pip install torch[cpu] pettingzoo gymnasium requests
 ADD requirements.txt /data
 RUN pip install -r requirements.txt
 RUN pip install requests
