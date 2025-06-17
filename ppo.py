@@ -283,6 +283,9 @@ if __name__ == "__main__":
         print("SPS:", int(episode / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(episode / (time.time() - start_time)), episode)
         
+        
+        torch.save({"model_state_dict":agent.state_dict(), "optimizer_state_dict": optimizer.state_dict()}, f"runs/{run_name}/model_{episode}.pt")
+        print(f"Model saved at runs/{run_name}/model_{episode}.pt")
 
     """ RENDER THE POLICY """
     env = parallel_env()
@@ -312,8 +315,7 @@ if __name__ == "__main__":
                     print("Termination or truncation detected. Ending episode.")
                     break
     
-    torch.save({"model_state_dict":agent.state_dict(), "optimizer_state_dict": optimizer.state_dict()}, f"runs/{run_name}/model_{episode}.pt")
-    print(f"Model saved at runs/{run_name}/model_{episode}.pt")
+    
     scheduler.step()
 
     
