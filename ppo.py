@@ -1,4 +1,6 @@
 import os
+import random
+import string
 import time
 import numpy as np
 import torch
@@ -14,7 +16,9 @@ from env import parallel_env
 
 continue_train=os.getenv('CONTINUE_TRAIN', 'False') == 'True'
 model_path=os.getenv('MODEL_PATH', 'ppo_model.pt') 
-run_name=os.getenv('RUN_NAME', 'default_run')
+run_name=os.getenv('RUN_NAME', ''.join(random.choices(string.ascii_uppercase + string.digits, k=12)))
+start_lr=float(os.getenv('START_LR', 0.001))
+
 writer = SummaryWriter(f"runs/{run_name}")
 start_time = time.time()
 
@@ -107,7 +111,7 @@ if __name__ == "__main__":
     """ LEARNER SETUP """
     print(f"Num actions is {num_actions} space={num_actions}")
     agent = Agent(obs_size=observation_size[0],num_actions=num_actions)
-    optimizer = optim.Adam(agent.parameters(), lr=0.001, eps=1e-5)
+    optimizer = optim.Adam(agent.parameters(), lr=start_lr, eps=1e-5)
     if continue_train:
         checkpoint=torch.load(model_path)
         agent.load_state_dict(checkpoint['model_state_dict'])
@@ -308,8 +312,10 @@ if __name__ == "__main__":
                     print("Termination or truncation detected. Ending episode.")
                     break
     
-    scheduler.step()
     torch.save({"model_state_dict":agent.state_dict(), "optimizer_state_dict": optimizer.state_dict()}, f"runs/{run_name}/model_{episode}.pt")
     print(f"Model saved at runs/{run_name}/model_{episode}.pt")
+    scheduler.step()
+
+    
 
 writer.close()
