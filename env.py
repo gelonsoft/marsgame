@@ -45,8 +45,8 @@ def get_player_state(player_id):
         if LOG_REQUESTS:
             request_responses[request_number]={"request":response.request.url,"method":"get","response":response_json}
         request_number+=1
-        with open(os.path.join("debug",f"{request_number}.json"),"w") as f:
-            f.write(json.dumps(response_json,indent=2))
+        #with open(os.path.join("debug",f"{request_number}.json"),"w") as f:
+        #    f.write(json.dumps(response_json,indent=2))
         #logging.debug(f"Request url={url} {player_id} response:\n{json.dumps(response_json,indent=2)}")
         return response_json
     except Exception as e:
