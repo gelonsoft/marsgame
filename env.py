@@ -263,7 +263,7 @@ class TerraformingMarsEnv(ParallelEnv):
                 logging.info(f"Agent {agent} selected input: {player_input.get('type')}")
                 res=self.post_player_input(agent, player_input)
                 if res is None:
-                    logging.error(f"Failed to post player input for agent {agent} with input: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent]['waitingSteps'], indent=2)}\n")
+                    logging.error(f"Failed to post player input for agent {agent} with input: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
                     player_input=None
 
             self.rewards[agent] = 1.0 if player_input else -1.0
