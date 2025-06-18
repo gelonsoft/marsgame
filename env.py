@@ -73,8 +73,8 @@ def post_player_input(run_id,player_id, player_input_model):
         logging.debug(f"Response: post_player_input\n---\n{resp}\n---")
         return resp
     except Exception as e:
-        logging.error(f"Bad post_player_input response:\n{response.text}")
-        raise e
+        logging.error(f"Bad post_player_input response:\n{response.text}\npayload:\n{json.dumps(player_input_model)}\n")
+        return None
 
 def start_new_game(num_players):
     
@@ -261,7 +261,11 @@ class TerraformingMarsEnv(ParallelEnv):
             player_input = self.action_lookup[agent].get(action)
             if player_input:
                 logging.info(f"Agent {agent} selected input: {player_input.get('type')}")
-                self.post_player_input(agent, player_input)
+                res=self.post_player_input(agent, player_input)
+                if res is None:
+                    logging.error(f"Failed to post player input for agent {agent} with input: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent]['waitingSteps'], indent=2)}\n")
+                    player_input=None
+
             self.rewards[agent] = 1.0 if player_input else -1.0
             self.dones[agent] = True
 
