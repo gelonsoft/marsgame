@@ -260,7 +260,7 @@ class TerraformingMarsEnv(ParallelEnv):
             #print(f"Action: {action}")
             player_input = self.action_lookup[agent].get(action)
             if player_input:
-                logging.info(f"Agent {agent} selected input: {player_input.get('type')}")
+                print(f"Agent {agent} selected input: {player_input.get('type')}")
                 res=self.post_player_input(agent, player_input)
                 if res is None:
                     logging.error(f"Failed to post player input for agent {agent} with input: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
@@ -276,7 +276,7 @@ class TerraformingMarsEnv(ParallelEnv):
         #if all(self.dones.values()):
         #    self.agents = []
         #obs, rewards, terminations, truncations, infos
-        print(f"Executing step... rewards={self.rewards} actions: {actions} of {[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]}")
+        print(f"Executing step {self.game_id}... rewards={self.rewards} actions: {actions} of {[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]}")
         return self.current_obs,self.rewards,self.terminations,self.truncations, self.infos
 
     def render(self,render_mode):
