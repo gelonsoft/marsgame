@@ -316,6 +316,7 @@ if __name__ == "__main__":
                 model_files.sort(key=os.path.getmtime)
                 os.remove(model_files[0])           
                 print(f"Removed oldest model file {model_files[0]} to keep {save_last_n} models")
+        scheduler.step()
                       
     """ RENDER THE POLICY """
     env = parallel_env()
@@ -346,7 +347,7 @@ if __name__ == "__main__":
                     break
     
     
-    scheduler.step()
+    
 
     
 
