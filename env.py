@@ -172,7 +172,7 @@ def start_new_game(num_players):
 class TerraformingMarsEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "terraforming_mars_aec_v0","is_parallelizable":True}
 
-    def __init__(self, agent_ids: List[str], init_from_player_state=True, player_state=None):
+    def __init__(self, agent_ids: List[str], init_from_player_state=False, player_state=None):
         super().__init__()
         self.decision_mapper=TerraformingMarsDecisionMapper(None)
         
