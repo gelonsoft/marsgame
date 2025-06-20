@@ -50,7 +50,46 @@ writer.add_text(
 
 start_time = time.time()
 
-def mask_logits(logits: torch.Tensor, action_mask: list) -> torch.Tensor:
+def mask_logits(logits, action_mask):
+    """
+    Modify logits by masking rightmost elements based on action_mask.
+    
+    Args:
+        logits: Input tensor of shape (batch_size, LOGITS_SIZE)
+        action_mask: List of integers where each integer represents how many 
+                    rightmost elements to mask in each row (0 means mask all)
+    
+    Returns:
+        Modified logits tensor with appropriate elements masked
+    """
+    # Ensure inputs are on the same device
+    device = logits.device
+    batch_size, logits_size = logits.shape
+    
+    # Convert action_mask to a tensor
+    action_mask = torch.tensor(action_mask, dtype=torch.long, device=device)
+    
+    # Create a mask tensor initialized with -inf (to effectively disable those logits)
+    mask = torch.full_like(logits, float('-inf'))
+    
+    # For each row, keep the first (logits_size - mask_value) elements unmasked
+    for i in range(batch_size):
+        mask_value = action_mask[i]
+        if mask_value == 0:
+            # Mask all elements
+            mask[i, :] = 0
+        else:
+            # Keep first (logits_size - mask_value) elements, mask the rest
+            keep_count = logits_size - mask_value
+            if keep_count > 0:
+                mask[i, :keep_count] = 0
+    
+    # Apply the mask to the logits
+    modified_logits = logits + mask
+    
+    return modified_logits
+
+def mask_logits_old(logits: torch.Tensor, action_mask: list) -> torch.Tensor:
     """
     Masks logits by setting positions specified in action_mask to negative infinity.
     
@@ -70,7 +109,7 @@ def mask_logits(logits: torch.Tensor, action_mask: list) -> torch.Tensor:
         if mask_count == 0:
             # Mask all elements in this row
             masked_logits[i, :] = -float('inf')
-            masked_logits[0]=0
+            masked_logits[0]=0.0
         else:
             # Mask rightmost (LOGITS_SIZE - mask_count) elements
             start_idx = mask_count
@@ -208,7 +247,7 @@ if __name__ == "__main__":
                 actions, logprobs, _, values = agent.get_action_and_value(obs,action_mask=action_mask)
                 for ii in range(len(env.agents)):
                     rb_action_masks[step][ii]=action_mask[ii]
-                print(f"action_mask={action_mask} rb_action_masks.shape={rb_action_masks.shape} rb_action_masks={rb_action_masks.cpu()}")
+                #print(f"action_mask={action_mask} rb_action_masks.shape={rb_action_masks.shape} rb_action_masks={rb_action_masks.cpu()}")
                 # execute the environment and log data
                 
 
