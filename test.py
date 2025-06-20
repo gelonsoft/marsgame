@@ -17,32 +17,35 @@ def mask_logits(logits, action_mask):
     device = logits.device
     batch_size, logits_size = logits.shape
     
+    modified_logits=logits.clone()
     # Convert action_mask to a tensor
     action_mask = torch.tensor(action_mask, dtype=torch.long, device=device)
     
     # Create a mask tensor initialized with -inf (to effectively disable those logits)
-    mask = torch.full_like(logits, float('-inf'))
+    modified_logits = torch.full_like(logits, float('-inf'))
     
     # For each row, keep the first (logits_size - mask_value) elements unmasked
     for i in range(batch_size):
         mask_value = action_mask[i]
-        if mask_value == 0:
+        if mask_value == logits_size:
+            # Mask no elements
+            modified_logits[i]=logits[i]
+        elif mask_value == 0:
             # Mask all elements
-            mask[i, :] = 0
+            modified_logits[i,0]=0
         else:
             # Keep first (logits_size - mask_value) elements, mask the rest
-            keep_count = logits_size - mask_value
-            if keep_count > 0:
-                mask[i, :keep_count] = 0
+            if mask_value > 0:
+                modified_logits[i, :mask_value] = logits[i,:mask_value]
     
     # Apply the mask to the logits
-    modified_logits = logits + mask
+    #modified_logits = logits + mask
     
     return modified_logits
 
 
-logits=torch.randn(2,7)
-action_mask=[3,5]
+logits=torch.randn(3,7)
+action_mask=[0,7,3]
 modified_logits=mask_logits(logits, action_mask)
 probs = Categorical(logits=modified_logits)
 print(f"Original logits:\n{logits}")

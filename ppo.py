@@ -66,61 +66,31 @@ def mask_logits(logits, action_mask):
     device = logits.device
     batch_size, logits_size = logits.shape
     
+    modified_logits=logits.clone()
     # Convert action_mask to a tensor
     action_mask = torch.tensor(action_mask, dtype=torch.long, device=device)
     
-    
     # Create a mask tensor initialized with -inf (to effectively disable those logits)
-    mask = torch.full_like(logits, float('-inf'))
+    modified_logits = torch.full_like(logits, float('-inf'))
     
     # For each row, keep the first (logits_size - mask_value) elements unmasked
     for i in range(batch_size):
         mask_value = action_mask[i]
-        if mask_value == 0:
+        if mask_value == logits_size:
+            # Mask no elements
+            modified_logits[i]=logits[i]
+        elif mask_value == 0:
             # Mask all elements
-            mask[i, :] = 0
+            modified_logits[i,0]=0
         else:
             # Keep first (logits_size - mask_value) elements, mask the rest
-            keep_count = logits_size - mask_value
-            if keep_count > 0:
-                mask[i, :keep_count] = 0
+            if mask_value > 0:
+                modified_logits[i, :mask_value] = logits[i,:mask_value]
     
     # Apply the mask to the logits
-    modified_logits = logits + mask
-    print(f"Original logits:\n{logits}")
-    print(f"Modified logits:\n{modified_logits}")
-    print(f"Action mask: {action_mask}")
+    #modified_logits = logits + mask
+    
     return modified_logits
-
-def mask_logits_old(logits: torch.Tensor, action_mask: list) -> torch.Tensor:
-    """
-    Masks logits by setting positions specified in action_mask to negative infinity.
-    
-    Args:
-        logits: Input tensor of shape (batch_size, LOGITS_SIZE)
-        action_mask: List of integers where each integer represents how many 
-                     rightmost elements to mask in each row (0 means mask all)
-    
-    Returns:
-        Tensor with masked logits
-    """
-    masked_logits = logits.clone()
-    batch_size = logits.size(0)
-    
-    for i in range(batch_size):
-        mask_count = action_mask[i]
-        if mask_count == 0:
-            # Mask all elements in this row
-            masked_logits[i, :] = -float('inf')
-            masked_logits[0]=0.0
-        else:
-            # Mask rightmost (LOGITS_SIZE - mask_count) elements
-            start_idx = mask_count
-            masked_logits[i, start_idx:] = -float('inf')
-    
-    print(f"Masked by actionmask={action_mask} logits: {masked_logits}\nsource_logits={logits}")
-
-    return masked_logits
 
 class Agent(nn.Module):
     def __init__(self, obs_size,num_actions):
