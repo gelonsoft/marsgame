@@ -268,7 +268,7 @@ if __name__ == "__main__":
                 # select the indices we want to train on
                 end = start + batch_size
                 batch_index = b_index[start:end]
-                print(f"Batch index: {batch_index} action_mask={b_action_masks.long()[batch_index].cpu()}")
+                #print(f"Batch index: {batch_index} action_mask={b_action_masks.long()[batch_index].cpu()}")
 
                 _, newlogprob, entropy, value = agent.get_action_and_value(
                     b_obs[batch_index], b_actions.long()[batch_index],action_mask=b_action_masks.long()[batch_index]
