@@ -234,7 +234,7 @@ class TerraformingMarsEnv(ParallelEnv):
                 self.player_states[agent] = self.start_player_state
             else:
                 self.player_states[agent] = get_player_state(self.agent_id_to_player_id[agent])
-            action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"))  # Initialize the action map
+            action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"),self.player_states[agent])  # Initialize the action map
             self.current_obs[agent] = observe(self.player_states[agent],action_map)
             #print(f"Action map: \n{json.dumps(action_map,indent=2)}")
             self.legal_actions[agent] = list(action_map.keys())[:MAX_ACTIONS]
