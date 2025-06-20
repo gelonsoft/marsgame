@@ -182,7 +182,7 @@ if __name__ == "__main__":
     rb_rewards = torch.zeros((max_cycles, num_agents)).to(device)
     rb_terms = torch.zeros((max_cycles, num_agents)).to(device)
     rb_values = torch.zeros((max_cycles, num_agents)).to(device)
-    rb_action_masks=[]
+    rb_action_masks=torch.zeros((max_cycles, num_agents)).to(device)
 
     """ TRAINING LOGIC """
     # train for n number of episodes
@@ -202,8 +202,9 @@ if __name__ == "__main__":
 
                 # get action from the agent
                 actions, logprobs, _, values = agent.get_action_and_value(obs,action_mask=action_mask)
-                rb_action_masks.append(action_mask)
-
+                for agent_id in env.agents:
+                    rb_action_masks[step][agent_id]=action_mask[agent_id]
+                print(f"action_mask={action_mask} rb_action_masks.shape={rb_action_masks.shape} rb_action_masks={rb_action_masks.cpu()}")
                 # execute the environment and log data
                 
 
@@ -254,7 +255,7 @@ if __name__ == "__main__":
         b_returns = torch.flatten(rb_returns[:end_step], start_dim=0, end_dim=1)
         b_values = torch.flatten(rb_values[:end_step], start_dim=0, end_dim=1)
         b_advantages = torch.flatten(rb_advantages[:end_step], start_dim=0, end_dim=1)
-        b_action_masks=rb_action_masks[:end_step]
+        b_action_masks=torch.flatten(rb_action_masks[:end_step], start_dim=0, end_dim=1)
         # Optimizing the policy and value network
         b_index = np.arange(len(b_obs))
         clip_fracs = []
@@ -266,9 +267,10 @@ if __name__ == "__main__":
                 # select the indices we want to train on
                 end = start + batch_size
                 batch_index = b_index[start:end]
+                print(f"Batch index: {batch_index} action_mask={b_action_masks.long()[batch_index].cpu()}")
 
                 _, newlogprob, entropy, value = agent.get_action_and_value(
-                    b_obs[batch_index], b_actions.long()[batch_index],action_mask=b_action_masks[batch_index]
+                    b_obs[batch_index], b_actions.long()[batch_index],action_mask=b_action_masks.long()[batch_index]
                 )
                 logratio = newlogprob - b_logprobs[batch_index]
                 ratio = logratio.exp()
