@@ -5,7 +5,12 @@ import json
 import gymnasium as gym
 from gymnasium import spaces
 from pettingzoo import AECEnv, ParallelEnv
-from pettingzoo.utils import agent_selector
+try:
+    from pettingzoo.utils import agent_selector
+    x=agent_selector(['1','2'])
+except:
+    from pettingzoo.utils import AgentSelector
+    x=AgentSelector(['1','2'])
 from typing import List, Dict
 from myconfig import MAX_ACTIONS
 from observe_gamestate import get_actions_shape, observe  # assuming observe() is defined in another module
@@ -167,21 +172,25 @@ def start_new_game(num_players):
 class TerraformingMarsEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "terraforming_mars_aec_v0","is_parallelizable":True}
 
-    def __init__(self, agent_ids: List[str], start_new_game=True, game_id=None):
+    def __init__(self, agent_ids: List[str], init_from_player_state=True, player_state=None):
         super().__init__()
         self.decision_mapper=TerraformingMarsDecisionMapper(None)
         
         self.game_id=None
-        if not start_new_game:
-            self.game_id=game_id
-
+        self.init_from_player_state=init_from_player_state
+        self.start_player_state=player_state
+        self.observations_made=0
+        #self.run_id
         #self.run_id=None
         self.spectator_id=None
         self.player_name_to_id={}
         self.agent_id_to_player_id={}
         self.possible_agents = agent_ids
         self.agents = self.possible_agents[:]
-        self._agent_selector = agent_selector(self.agents)
+        try:
+            self._agent_selector = agent_selector(self.agents)
+        except:
+            self._agent_selector = AgentSelector(self.agents)
         self.action_spaces = {}
         self.agent_selection = self._agent_selector.reset()
         self.dones = {agent: False for agent in self.agents}
@@ -217,7 +226,10 @@ class TerraformingMarsEnv(ParallelEnv):
         self.legal_actions = {}
         self.action_spaces = {}
         for agent in self.agents:
-            self.player_states[agent] = get_player_state(self.agent_id_to_player_id[agent])
+            if self.init_from_player_state and self.observations_made==0:
+                self.player_states[agent] = get_player_state(self.agent_id_to_player_id[agent])
+            else:
+                self.player_states[agent] = self.start_player_state
             action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"))  # Initialize the action map
             self.current_obs[agent] = observe(self.player_states[agent],action_map)
             #print(f"Action map: \n{json.dumps(action_map,indent=2)}")
@@ -226,26 +238,39 @@ class TerraformingMarsEnv(ParallelEnv):
             self.reverse_action_lookup[agent] = action_map
 
             self.action_spaces[agent] = spaces.Discrete(len(self.action_lookup[agent]) or 1)
+        self.observations_made+=1
 
     def observe(self, agent):
         return self.current_obs[agent]
 
     def reset(self, seed=None, options=None):
         self.agents = self.possible_agents[:]
-        self._agent_selector = agent_selector(self.agents)
+        try:
+            self._agent_selector = agent_selector(self.agents)
+        except:
+            self._agent_selector = AgentSelector(self.agents)
         self.agent_selection = self._agent_selector.reset()
-        new_game_response=start_new_game(len(self.agents))
-        self.game_id=new_game_response['id']
-        #self.run_id=new_game_response['runId']
-        self.spectator_id=new_game_response['spectatorId']
+        new_game_response=None
+        if self.init_from_player_state:
+            self.spectator_id=self.start_player_state['game']['spectatorId']
+            new_game_response=self.start_player_state
+        else:
+            new_game_response=start_new_game(len(self.agents))
+            self.game_id=new_game_response['id']
+            #self.run_id=new_game_response['runId']
+            self.spectator_id=new_game_response['spectatorId']
         self.player_name_to_id={}
         self.agent_id_to_player_id={}
 
         for i in range(len(self.agents)):
             agent=self.agents[i]
-            player=new_game_response['players'][i]
-            self.agent_id_to_player_id[agent]=player['id']
-            self.player_name_to_id[player['id']]=player['color']
+            if self.init_from_player_state:
+                self.agent_id_to_player_id[agent]=new_game_response['id']
+                self.player_name_to_id[new_game_response['id']]=new_game_response['thisPlayer']['color']
+            else:
+                player=new_game_response['players'][i]
+                self.agent_id_to_player_id[agent]=player['id']
+                self.player_name_to_id[player['id']]=player['color']
             self.dones[agent] = False
             self.rewards[agent] = 0.0
             self.infos[agent] = {}

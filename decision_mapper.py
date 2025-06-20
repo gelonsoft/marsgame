@@ -94,12 +94,15 @@ class TerraformingMarsDecisionMapper:
         elif input_type == "or":
             # For OR options, each option is a separate action
             options = player_input.get("options", [])
-            for i, option in enumerate(options):
-                action_space[i] = {
-                    "type": "or",
-                    "index": i,
-                    "response": self.map_decision(option) if option else {"type": "option"}
-                }
+            i=0
+
+            for idx, option in enumerate(options):
+                sub_action_spaces = self.generate_action_space(option)
+                for sub_option_idx in sub_action_spaces:
+                    action_space[i] = {"type":"or",
+                                       "index":idx,
+                                       "response":sub_action_spaces[sub_option_idx]}
+                    i+=1
         
         elif input_type == "initialCards":
             # For initial cards selection, we need to handle multiple card selections
