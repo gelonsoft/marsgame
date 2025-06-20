@@ -137,7 +137,12 @@ class TerraformingMarsDecisionMapper:
         
         elif input_type == "card":
             # For card selection, generate all combinations within min/max constraints
-            cards = player_input.get("cards", [])
+            original_cards = player_input.get("cards", [])
+            cards=[card for card in original_cards if not card.get('isDisabled',False)]
+            print(f"Original cards: \n{original_cards}")
+            print(f"Not disabled cards: \n{cards}")
+            
+            
             min_cards = player_input.get("min", 0)
             max_cards = player_input.get("max", len(cards))
             
