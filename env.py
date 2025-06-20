@@ -78,7 +78,7 @@ def post_player_input(run_id,player_id, player_input_model):
         logging.debug(f"Response: post_player_input\n---\n{resp}\n---")
         return resp
     except Exception as e:
-        logging.error(f"Bad post_player_input response:\n{response.text}\npayload:\n{json.dumps(player_input_model)}\n")
+        print(f"Bad post_player_input response:\n{response.text}\npayload:\n{json.dumps(player_input_model)}\n")
         return None
 
 def start_new_game(num_players):
