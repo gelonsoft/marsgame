@@ -70,11 +70,14 @@ def mask_logits(logits: torch.Tensor, action_mask: list) -> torch.Tensor:
         if mask_count == 0:
             # Mask all elements in this row
             masked_logits[i, :] = -float('inf')
+            masked_logits=[0]=0
         else:
             # Mask rightmost (LOGITS_SIZE - mask_count) elements
             start_idx = mask_count
             masked_logits[i, start_idx:] = -float('inf')
     
+    print(f"Masked by actionmask={action_mask} logits: {masked_logits}\nsource_logits={logits}")
+
     return masked_logits
 
 class Agent(nn.Module):
