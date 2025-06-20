@@ -195,6 +195,11 @@ class TerraformingMarsDecisionMapper:
                         "type": "colony",
                         "colonyName": item["name"]
                     }
+                elif input_type == "party":
+                    action_space[i] = {
+                        "type": "colony",
+                        "partyName": item
+                    }
                 else:
                     action_space[i] = {
                         "type": input_type,
