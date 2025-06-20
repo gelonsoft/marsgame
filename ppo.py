@@ -70,7 +70,7 @@ def mask_logits(logits: torch.Tensor, action_mask: list) -> torch.Tensor:
         if mask_count == 0:
             # Mask all elements in this row
             masked_logits[i, :] = -float('inf')
-            masked_logits=[0]=0
+            masked_logits[0]=0
         else:
             # Mask rightmost (LOGITS_SIZE - mask_count) elements
             start_idx = mask_count
