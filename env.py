@@ -17,7 +17,7 @@ import os
 
 logging.basicConfig(level=logging.INFO)  # Set the logging level to DEBUG
 
-SERVER_BASE_URL=os.environ.get('SERVER_BASE_URL',"http://localhost:9976")
+SERVER_BASE_URL=os.environ.get('SERVER_BASE_URL',"http://lev-rworker-3:9976")
 
 request_number=0
 request_responses={}
@@ -248,6 +248,9 @@ class TerraformingMarsEnv(ParallelEnv):
 
         self._update_all_observations()
         return self.current_obs,self.infos
+    
+    def get_action_mask(self):
+        return [len(self.legal_actions[agent]) for agent in self.agents]
 
 
     def post_player_input(self,agent_id,player_input):

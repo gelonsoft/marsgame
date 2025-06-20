@@ -50,6 +50,33 @@ writer.add_text(
 
 start_time = time.time()
 
+def mask_logits(logits: torch.Tensor, action_mask: list) -> torch.Tensor:
+    """
+    Masks logits by setting positions specified in action_mask to negative infinity.
+    
+    Args:
+        logits: Input tensor of shape (batch_size, LOGITS_SIZE)
+        action_mask: List of integers where each integer represents how many 
+                     rightmost elements to mask in each row (0 means mask all)
+    
+    Returns:
+        Tensor with masked logits
+    """
+    masked_logits = logits.clone()
+    batch_size = logits.size(0)
+    
+    for i in range(batch_size):
+        mask_count = action_mask[i]
+        if mask_count == 0:
+            # Mask all elements in this row
+            masked_logits[i, :] = -float('inf')
+        else:
+            # Mask rightmost (LOGITS_SIZE - mask_count) elements
+            start_idx = mask_count
+            masked_logits[i, start_idx:] = -float('inf')
+    
+    return masked_logits
+
 class Agent(nn.Module):
     def __init__(self, obs_size,num_actions):
         super().__init__()
@@ -71,9 +98,9 @@ class Agent(nn.Module):
     def get_value(self, x):
         return self.critic(self.network(x))
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value(self, x, action=None, action_mask=None):
         hidden = self.network(x)
-        logits = self.actor(hidden)
+        logits = mask_logits(self.actor(hidden),action_mask=action_mask)
         probs = Categorical(logits=logits)
         if action is None:
             action = probs.sample()
@@ -155,6 +182,7 @@ if __name__ == "__main__":
     rb_rewards = torch.zeros((max_cycles, num_agents)).to(device)
     rb_terms = torch.zeros((max_cycles, num_agents)).to(device)
     rb_values = torch.zeros((max_cycles, num_agents)).to(device)
+    rb_action_masks=[]
 
     """ TRAINING LOGIC """
     # train for n number of episodes
@@ -163,6 +191,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             # collect observations and convert to batch of torch tensors
             next_obs, info = env.reset(seed=None)
+            action_mask=env.get_action_mask()
             # reset the episodic return
             total_episodic_return = 0
 
@@ -172,7 +201,8 @@ if __name__ == "__main__":
                 obs = batchify_obs(next_obs, device)
 
                 # get action from the agent
-                actions, logprobs, _, values = agent.get_action_and_value(obs)
+                actions, logprobs, _, values = agent.get_action_and_value(obs,action_mask=action_mask)
+                rb_action_masks.append(action_mask)
 
                 # execute the environment and log data
                 
@@ -224,7 +254,7 @@ if __name__ == "__main__":
         b_returns = torch.flatten(rb_returns[:end_step], start_dim=0, end_dim=1)
         b_values = torch.flatten(rb_values[:end_step], start_dim=0, end_dim=1)
         b_advantages = torch.flatten(rb_advantages[:end_step], start_dim=0, end_dim=1)
-
+        b_action_masks=rb_action_masks[:end_step]
         # Optimizing the policy and value network
         b_index = np.arange(len(b_obs))
         clip_fracs = []
@@ -238,7 +268,7 @@ if __name__ == "__main__":
                 batch_index = b_index[start:end]
 
                 _, newlogprob, entropy, value = agent.get_action_and_value(
-                    b_obs[batch_index], b_actions.long()[batch_index]
+                    b_obs[batch_index], b_actions.long()[batch_index],action_mask=b_action_masks[batch_index]
                 )
                 logratio = newlogprob - b_logprobs[batch_index]
                 ratio = logratio.exp()
@@ -334,7 +364,8 @@ if __name__ == "__main__":
             terms = [False]
             truncs = [False]
             for cycle in range(max_cycles):
-                actions, logprobs, _, values = agent.get_action_and_value(obs)
+                action_mask=env.get_action_mask()
+                actions, logprobs, _, values = agent.get_action_and_value(obs,action_mask=action_mask)
                 #print(f"Agent eval step: actions={actions}")
                 obs, rewards, terms, truncs, infos = env.step(unbatchify(actions, env))
                 for agent_id in env.agents:
