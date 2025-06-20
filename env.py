@@ -55,7 +55,7 @@ def get_player_state(player_id):
         #logging.debug(f"Request url={url} {player_id} response:\n{json.dumps(response_json,indent=2)}")
         return response_json
     except Exception as e:
-        logging.error(f"Bad get_player_state response:\n{response.text}")
+        print(f"Bad get_player_state response:\n{response.text}")
         raise e
 
 def post_player_input(run_id,player_id, player_input_model):
