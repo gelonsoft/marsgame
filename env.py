@@ -167,10 +167,14 @@ def start_new_game(num_players):
 class TerraformingMarsEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "terraforming_mars_aec_v0","is_parallelizable":True}
 
-    def __init__(self, agent_ids: List[str]):
+    def __init__(self, agent_ids: List[str], start_new_game=True, game_id=None):
         super().__init__()
         self.decision_mapper=TerraformingMarsDecisionMapper(None)
+        
         self.game_id=None
+        if not start_new_game:
+            self.game_id=game_id
+
         #self.run_id=None
         self.spectator_id=None
         self.player_name_to_id={}
@@ -266,7 +270,7 @@ class TerraformingMarsEnv(ParallelEnv):
                 print(f"Agent {agent} selected input: {player_input.get('type')}")
                 res=self.post_player_input(agent, player_input)
                 if res is None:
-                    logging.error(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
+                    print(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
                     raise Exception("Bad player actions")
                     player_input=None
 
