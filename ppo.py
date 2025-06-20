@@ -191,7 +191,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             # collect observations and convert to batch of torch tensors
             next_obs, info = env.reset(seed=None)
-            action_mask=env.get_action_mask()
+            
             # reset the episodic return
             total_episodic_return = 0
 
@@ -201,6 +201,7 @@ if __name__ == "__main__":
                 obs = batchify_obs(next_obs, device)
 
                 # get action from the agent
+                action_mask=env.get_action_mask()
                 actions, logprobs, _, values = agent.get_action_and_value(obs,action_mask=action_mask)
                 for ii in range(len(env.agents)):
                     rb_action_masks[step][ii]=action_mask[ii]
