@@ -568,9 +568,13 @@ class TerraformingMarsDecisionMapper:
         
         # Check if certain payment methods are restricted
         can_use_heat = payment_options.get("heat", False)
-        can_use_steel = "building" in card_metadata.get("tags",[]) or payment_options.get("steel", False)
-        can_use_titanium = "space" in card_metadata.get("tags",[]) or payment_options.get("titanium", False)
+        can_use_steel = "building" in card_metadata.get("tags",[]) and payment_options.get("steel", False)
+        can_use_titanium = "space" in card_metadata.get("tags",[]) and payment_options.get("titanium", False)
         can_use_plants = payment_options.get("plants", False)
+        can_use_kuiper_asteroids= player_resources['kuiperAsteroids']>0 and (
+                (selected_card=="Aquifer" or selected_card=="Asteroid:SP") 
+                and player_state['thisPlayer'].get('pickedCorporationCard')[0]=="Kuiper Cooperative"
+            )
         
         #print(f"can_use_heat={can_use_heat}")
         
@@ -637,6 +641,8 @@ class TerraformingMarsDecisionMapper:
                             "spireScience", "seeds", "auroraiData", 
                             "graphene", "kuiperAsteroids", "corruption"]:
                 if player_resources[resource] > 0:
+                    if not can_use_kuiper_asteroids and resource=="kuiperAsteroids":
+                        continue
                     max_replace = min(player_resources[resource], remaining_mc)
                     if max_replace > 0:
                         new_payment = payment.copy()
