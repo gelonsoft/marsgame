@@ -94,17 +94,19 @@ class TerraformingMarsDecisionMapper:
             # Generate all combinations of sub-action indices
             action_indices = product(*[range(len(space)) for space in sub_action_spaces])
             
-            is_gain_resource_action=len(options)>0
+            is_limited_amount=len(options)>0
             for opt in options:
-                is_gain_resource_action &=opt.get('buttonLabel')=="Select" and opt.get('type')=="amount"
+                is_limited_amount &=(opt.get('buttonLabel') in ["Select"] or 'Spend' in opt.get('buttonLabel')) and opt.get('type')=="amount"
             
+            #print(f"is_limited_amount={is_limited_amount}")
             k=0
             for i, indices in enumerate(action_indices):
                 responses = [sub_action_spaces[j][idx]["responses"][0] if "responses" in sub_action_spaces[j][idx] 
                         else sub_action_spaces[j][idx] 
                         for j, idx in enumerate(indices)]
                 
-                if is_gain_resource_action:
+                
+                if is_limited_amount:
                     if sum([x.get('amount') for x in responses])==int(player_input.get('title').get('data')[0].get('value')):
                         action_space[k] = {"type": "and", "responses": responses}
                         k=k+1
@@ -183,12 +185,15 @@ class TerraformingMarsDecisionMapper:
             # For amount selection, each possible amount is a separate action
             min_amount = player_input.get("min", 0)
             max_amount = player_input.get("max", 0)
-            
+            j=0
             for amount in range(min_amount, max_amount + 1):
-                action_space[amount - min_amount] = {
+                if player_input.get('title',"")=="Stormcraft Incorporated Floaters (2 heat each)" and amount %2 != 0:
+                    continue
+                action_space[j] = {
                     "type": "amount",
                     "amount": amount
                 }
+                j=j+1
         
         elif input_type in ["projectCard", "colony", "delegate", "party", 
                         "player", "globalEvent", "resource"]:
