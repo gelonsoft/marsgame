@@ -5,6 +5,15 @@ from itertools import product
 import logging
   # Set the logging level to
 
+
+ALL_CARDS={}
+with open("cards.json",'r',encoding='utf-8') as f:
+    cards=json.loads(f.read())
+    for card in cards:
+        ALL_CARDS[card['name']]=card
+    
+
+
 @dataclass
 class DecisionContext:
     """Context for making decisions - can be extended with game state, AI logic, etc."""
@@ -500,6 +509,8 @@ class TerraformingMarsDecisionMapper:
         if card_cost <= 0:
             return []
         
+        card_metadata=ALL_CARDS[selected_card]
+        
         #print(f"Player input: {player_input}")
         # Get player's available resources
         player_resources = {
@@ -527,8 +538,8 @@ class TerraformingMarsDecisionMapper:
         
         # Check if certain payment methods are restricted
         can_use_heat = payment_options.get("heat", True)
-        can_use_steel = True
-        can_use_titanium = True
+        can_use_steel = "building" in card_metadata.get("tags",[])
+        can_use_titanium = "space" in card_metadata.get("tags",[])
         can_use_plants = payment_options.get("plants", True)
         
         # Calculate maximum possible units for each resource type without overpaying
