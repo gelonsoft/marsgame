@@ -94,11 +94,24 @@ class TerraformingMarsDecisionMapper:
             # Generate all combinations of sub-action indices
             action_indices = product(*[range(len(space)) for space in sub_action_spaces])
             
+            is_gain_resource_action=len(options)>0
+            for opt in options:
+                is_gain_resource_action &=opt.get('buttonLabel')=="Select" and opt.get('type')=="amount"
+            
+            k=0
             for i, indices in enumerate(action_indices):
                 responses = [sub_action_spaces[j][idx]["responses"][0] if "responses" in sub_action_spaces[j][idx] 
                         else sub_action_spaces[j][idx] 
                         for j, idx in enumerate(indices)]
-                action_space[i] = {"type": "and", "responses": responses}
+                
+                if is_gain_resource_action:
+                    if sum([x.get('amount') for x in responses])==int(player_input.get('title').get('data')[0].get('value')):
+                        action_space[k] = {"type": "and", "responses": responses}
+                        k=k+1
+                else:
+                    action_space[k] = {"type": "and", "responses": responses}
+                    k=k+1
+                    
         
         elif input_type == "or":
             # For OR options, each option is a separate action
