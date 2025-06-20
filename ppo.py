@@ -203,7 +203,7 @@ if __name__ == "__main__":
                 # get action from the agent
                 actions, logprobs, _, values = agent.get_action_and_value(obs,action_mask=action_mask)
                 for ii in range(len(env.agents)):
-                    rb_action_masks[step][agent_id]=action_mask[ii]
+                    rb_action_masks[step][ii]=action_mask[ii]
                 print(f"action_mask={action_mask} rb_action_masks.shape={rb_action_masks.shape} rb_action_masks={rb_action_masks.cpu()}")
                 # execute the environment and log data
                 
