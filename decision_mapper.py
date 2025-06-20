@@ -258,7 +258,14 @@ class TerraformingMarsDecisionMapper:
         elif input_type == "resources":
             # For resource selection, we'll just return the default for now
             action_space[0] = self._map_select_resources(player_input)
-        
+        elif input_type=="payment":
+            payments=self._create_payment_from_input(player_input,None,None,player_state=player_state)
+            for i,payment in enumerate(payments):
+                action_space[i] = {
+                    "type":"payment",
+                    "payment": payment
+                }
+
         else:
             # For other types, just return the default mapped decision
             action_space[0] = self.map_decision(player_input)
@@ -519,15 +526,20 @@ class TerraformingMarsDecisionMapper:
         """Generate all valid payment combinations for card playment based on available resources."""
         # Find the selected card to get its cost
         card_cost = 0
-        for card in cards:
-            if card.get("name") == selected_card:
-                card_cost = card.get("calculatedCost", 0)
-                break
+        card_metadata={}
+        if selected_card:
+            for card in cards:
+                if card.get("name") == selected_card:
+                    card_cost = card.get("calculatedCost", 0)
+                    break
+            card_metadata=ALL_CARDS[selected_card]
+        else:
+            card_cost=player_input.get('amount')
         
         if card_cost <= 0:
             return []
         
-        card_metadata=ALL_CARDS[selected_card]
+        
         
         #print(f"Player input: {player_input}")
         # Get player's available resources
@@ -555,10 +567,12 @@ class TerraformingMarsDecisionMapper:
         payment_options = player_input.get("paymentOptions", {})
         
         # Check if certain payment methods are restricted
-        can_use_heat = payment_options.get("heat", True)
-        can_use_steel = "building" in card_metadata.get("tags",[])
-        can_use_titanium = "space" in card_metadata.get("tags",[])
-        can_use_plants = payment_options.get("plants", True)
+        can_use_heat = payment_options.get("heat", False)
+        can_use_steel = "building" in card_metadata.get("tags",[]) or payment_options.get("steel", False)
+        can_use_titanium = "space" in card_metadata.get("tags",[]) or payment_options.get("titanium", False)
+        can_use_plants = payment_options.get("plants", False)
+        
+        #print(f"can_use_heat={can_use_heat}")
         
         # Calculate maximum possible units for each resource type without overpaying
         def max_resource(resource: str, value: int = 1) -> int:
