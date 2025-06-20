@@ -69,6 +69,7 @@ def mask_logits(logits, action_mask):
     # Convert action_mask to a tensor
     action_mask = torch.tensor(action_mask, dtype=torch.long, device=device)
     
+    
     # Create a mask tensor initialized with -inf (to effectively disable those logits)
     mask = torch.full_like(logits, float('-inf'))
     
@@ -86,7 +87,9 @@ def mask_logits(logits, action_mask):
     
     # Apply the mask to the logits
     modified_logits = logits + mask
-    
+    print(f"Original logits:\n{logits}")
+    print(f"Modified logits:\n{modified_logits}")
+    print(f"Action mask: {action_mask}")
     return modified_logits
 
 def mask_logits_old(logits: torch.Tensor, action_mask: list) -> torch.Tensor:
