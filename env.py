@@ -1,4 +1,5 @@
 from time import sleep
+import time
 import traceback
 import numpy as np
 import json
@@ -165,25 +166,27 @@ def start_new_game(num_players):
     if LOG_REQUESTS:
         request_responses[str(request_number)]={"request":response.request.url,"method":"get","response":response_json}
     request_number+=1
-    logging.info(f"Started new game {SERVER_BASE_URL}/spectator?id={response_json['spectatorId']}")
+    print(f"Started new game {SERVER_BASE_URL}/spectator?id={response_json['spectatorId']}")
     return response_json
 
 
 class TerraformingMarsEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "terraforming_mars_aec_v0","is_parallelizable":True}
 
-    def __init__(self, agent_ids: List[str], init_from_player_state=False, player_id=None,player_state=None):
+    def __init__(self, agent_ids: List[str], init_from_player_state=False, player_id=None,player_state=None,waiting_for=None):
         super().__init__()
         self.decision_mapper=TerraformingMarsDecisionMapper(None)
         
         self.game_id=None
         self.init_from_player_state=init_from_player_state
+        self.start_player_state=None
         if self.init_from_player_state:
             if player_id:
                 self.start_player_state=get_player_state(player_id)
             else:
                 self.start_player_state=player_state
         self.observations_made=0
+        self.waiting_for=waiting_for
         #self.run_id
         #self.run_id=None
         self.spectator_id=None
@@ -230,10 +233,14 @@ class TerraformingMarsEnv(ParallelEnv):
         self.legal_actions = {}
         self.action_spaces = {}
         for agent in self.agents:
-            if self.init_from_player_state and self.observations_made==0:
+            if self.start_player_state and self.observations_made==0:
                 self.player_states[agent] = self.start_player_state
             else:
                 self.player_states[agent] = get_player_state(self.agent_id_to_player_id[agent])
+                #print(f"self.observations_made={self.observations_made}")
+                if self.waiting_for and self.observations_made==0:
+                    self.player_states[agent]["waitingFor"] =self.waiting_for
+
             action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"),self.player_states[agent])  # Initialize the action map
             self.current_obs[agent] = observe(self.player_states[agent],action_map)
             #print(f"Action map: \n{json.dumps(action_map,indent=2)}")
@@ -255,6 +262,8 @@ class TerraformingMarsEnv(ParallelEnv):
             self._agent_selector = AgentSelector(self.agents)
         self.agent_selection = self._agent_selector.reset()
         new_game_response=None
+        self.terminations={agent: False for agent in self.agents}
+        self.truncations={agent: False for agent in self.agents}
         if self.init_from_player_state:
             self.spectator_id=self.start_player_state['game']['spectatorId']
             new_game_response=self.start_player_state
@@ -275,10 +284,11 @@ class TerraformingMarsEnv(ParallelEnv):
                 player=new_game_response['players'][i]
                 self.agent_id_to_player_id[agent]=player['id']
                 self.player_name_to_id[player['id']]=player['color']
+                print(f"Player links for new game {SERVER_BASE_URL}/player?id={player['id']}")
             self.dones[agent] = False
             self.rewards[agent] = 0.0
             self.infos[agent] = {}
-
+            
         self._update_all_observations()
         return self.current_obs,self.infos
     
@@ -291,12 +301,13 @@ class TerraformingMarsEnv(ParallelEnv):
 
     #action= {'1': 2774, '2': 6487}
     def step(self, actions):
+        acts=[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]
         for agent in actions:
             action=actions[agent]
             #print(f"Action: {action}")
             player_input = self.action_lookup[agent].get(action)
             if player_input:
-                print(f"Agent {agent} selected input: {player_input.get('type')}")
+                #print(f"Agent {agent} selected input: {player_input.get('type')}")
                 res=self.post_player_input(agent, player_input)
                 if res is None:
                     print(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
@@ -307,13 +318,39 @@ class TerraformingMarsEnv(ParallelEnv):
             self.dones[agent] = True
 
         self._update_all_observations()
+        
+        max_actions=max([len(self.action_lookup[agent].keys()) for agent in self.agents])
+        is_terminate=False
+        if max_actions==0:
+            for _ in range(3):
+                print(f"Warning, no actions: waiting 1 second and checking again... max_actions={max_actions}, actions={[len(self.action_lookup[agent].keys()) for agent in self.agents]}")
+
+                if all([self.player_states[agent].get('game',{}).get('phase',"")=="end" for agent in self.agents]):
+                    print("End game detected. Terminating...")
+                    self.terminations = {agent: True for agent in self.agents}
+                    is_terminate=True
+                    break
+                else:
+                    time.sleep(1)
+                    self._update_all_observations()
+                    max_actions=max([len(self.action_lookup[agent].keys()) for agent in self.agents])
+                    if max_actions>0:
+                        break
+        
+        if max_actions==0 and not is_terminate:
+            raise Exception(f"No steps players={[self.agent_id_to_player_id[agent] for agent in self.agents]}")
+
 
         # Placeholder reward logic
 
         #if all(self.dones.values()):
         #    self.agents = []
         #obs, rewards, terminations, truncations, infos
-        print(f"Executing step {self.game_id}... rewards={self.rewards} actions: {actions} of {[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]}")
+        terms=[self.player_states[agent].get('game',{}).get('isTerraformed',False) for agent in self.agents]
+        
+        phases=[self.player_states[agent].get('game',{}).get('phase',False) for agent in self.agents]
+        print(f"Executing step {self.game_id}... rewards={self.rewards} actions: {actions} of {acts} isTerraformed={terms} self.terminations={self.terminations} phases={phases}")
+
         return self.current_obs,self.rewards,self.terminations,self.truncations, self.infos
 
     def render(self,render_mode):

@@ -4,14 +4,10 @@ from dataclasses import dataclass
 from itertools import product
 import logging
   # Set the logging level to
+from myconfig import ALL_CARDS
+from payment_options_calculator import PaymentOptionsCalculator
 
-
-ALL_CARDS={}
-with open("cards.json",'r',encoding='utf-8') as f:
-    cards=json.loads(f.read())
-    for card in cards:
-        ALL_CARDS[card['name']]=card
-    
+   
 
 
 @dataclass
@@ -27,6 +23,7 @@ class TerraformingMarsDecisionMapper:
     
     def __init__(self, context: Optional[DecisionContext] = None):
         self.context = context or DecisionContext()
+        self.payment_options_calculator=PaymentOptionsCalculator()
     
     def map_decision(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -66,7 +63,7 @@ class TerraformingMarsDecisionMapper:
         
         return mapping_functions[input_type](player_input)
     
-    def generate_action_space(self, player_input: Dict[str, Any],player_state: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
+    def generate_action_space(self, player_input: Dict[str, Any],player_state: Dict[str, Any], is_main=True) -> Dict[int, Dict[str, Any]]:
         
         if player_input is None:
             return {}
@@ -81,7 +78,6 @@ class TerraformingMarsDecisionMapper:
         """
         action_space = {}
         input_type = player_input.get("type")
-        
         if input_type == "and":
             # For AND options, we need to generate combinations of all sub-options
             options = player_input.get("options", [])
@@ -89,40 +85,71 @@ class TerraformingMarsDecisionMapper:
                 return {0: {"type": "and", "responses": []}}
             
             # Generate action spaces for each sub-option
-            sub_action_spaces = [self.generate_action_space(opt,player_state) for opt in options]
+            sub_action_spaces = [self.generate_action_space(opt,player_state,False) for opt in options]
+            #for sac in sub_action_spaces:
+            #    print(f"sac={sac}")
             
             # Generate all combinations of sub-action indices
             action_indices = product(*[range(len(space)) for space in sub_action_spaces])
-            
             is_limited_amount=len(options)>0
             for opt in options:
-                is_limited_amount &=(opt.get('buttonLabel') in ["Select"] or 'Spend' in opt.get('buttonLabel')) and opt.get('type')=="amount"
+                is_limited_amount &=((opt.get('buttonLabel') in ["Select"]) or ('Spend' in opt.get('buttonLabel'))) and opt.get('type')=="amount"
             
             #print(f"is_limited_amount={is_limited_amount}")
             k=0
+            
             for i, indices in enumerate(action_indices):
-                responses = [sub_action_spaces[j][idx]["responses"][0] if "responses" in sub_action_spaces[j][idx] 
-                        else sub_action_spaces[j][idx] 
-                        for j, idx in enumerate(indices)]
+                #print(f"i={i} indices={indices}")
+                responses=[]
+                for j, idx in enumerate(indices):
+                    r=None
+                    if  "responses" in sub_action_spaces[j][idx]:
+                        r=sub_action_spaces[j][idx]["responses"][0] 
+                    else:
+                        r=sub_action_spaces[j][idx]
+                    #print(f"sub_action_spaces={sub_action_spaces}")
+                    #print(f"r={r} sub_action_spaces[{j}][{idx}]={sub_action_spaces[j][idx]}")
+                    responses.append(r.copy())
+                        
+                #responses = [sub_action_spaces[j][idx]["responses"][0] 
+                #            if "responses" in sub_action_spaces[j][idx] 
+                #        else sub_action_spaces[j][idx] 
+                #        ]
                 
                 
+                value=0
+                
+                for rr in responses:
+                    if rr.get('type',"")=="amount" and isinstance(rr,dict) and rr.get('value',-1)>=0:
+                        value+=rr.get('value',0)
+                        del rr['value']
+                    #print(f"response: {rr} value={value}")
+                #print(f"value={value} for responses={json.dumps(responses)} is_limited_amount={is_limited_amount}")
                 if is_limited_amount:
-                    if sum([x.get('amount') for x in responses])==int(player_input.get('title').get('data')[0].get('value')):
+                    #print(responses)
+                    #print(sum([x.get('amount') for x in responses]))
+                    #print(player_input.get('title').get('data')[0].get('value'))
+                    limit_value=int(player_input.get('title').get('data')[0].get('value'))
+                    #print(f"is_limited_amount={is_limited_amount} responses={responses}")
+                    if value==limit_value:
                         action_space[k] = {"type": "and", "responses": responses}
                         k=k+1
                 else:
                     action_space[k] = {"type": "and", "responses": responses}
                     k=k+1
-                    
-        
+                
+
         elif input_type == "or":
             # For OR options, each option is a separate action
             options = player_input.get("options", [])
             i=0
 
             for idx, option in enumerate(options):
-                sub_action_spaces = self.generate_action_space(option,player_state)
+                sub_action_spaces = self.generate_action_space(option,player_state,False)
                 for sub_option_idx in sub_action_spaces:
+                    r=sub_action_spaces[sub_option_idx]
+                    if isinstance(r,dict) and r.get('type','') == 'amount' and r.get('value',-1)>=0:
+                        del r['value']
                     action_space[i] = {"type":"or",
                                        "index":idx,
                                        "response":sub_action_spaces[sub_option_idx]}
@@ -135,7 +162,7 @@ class TerraformingMarsDecisionMapper:
                 return {0: {"type": "initialCards", "responses": []}}
             
             # Generate action spaces for each card selection option
-            sub_action_spaces = [self.generate_action_space(opt,player_state) for opt in options]
+            sub_action_spaces = [self.generate_action_space(opt,player_state,False) for opt in options]
             
             # Generate all combinations of card selections
             action_indices = product(*[range(len(space)) for space in sub_action_spaces])
@@ -184,15 +211,19 @@ class TerraformingMarsDecisionMapper:
         elif input_type == "amount":
             # For amount selection, each possible amount is a separate action
             min_amount = player_input.get("min", 0)
+            
+            value_coeff=1
+            if player_input.get('title',"")=="Stormcraft Incorporated Floaters (2 heat each)":
+                value_coeff=2
             max_amount = player_input.get("max", 0)
             j=0
             for amount in range(min_amount, max_amount + 1):
-                if player_input.get('title',"")=="Stormcraft Incorporated Floaters (2 heat each)" and amount %2 != 0:
-                    continue
                 action_space[j] = {
                     "type": "amount",
                     "amount": amount
-                }
+                }                 
+                if not is_main:
+                    action_space[j]["value"]=amount * value_coeff
                 j=j+1
         
         elif input_type in ["projectCard", "colony", "delegate", "party", 
@@ -217,7 +248,8 @@ class TerraformingMarsDecisionMapper:
             j=0
             for i, item in enumerate(items):
                 if input_type == "projectCard":
-                    payments = self._create_payment_from_input(player_input, item["name"], items,player_state)
+                    payments = self.payment_options_calculator.create_payment_from_input(player_input, item["name"], items,player_state)
+                    
                     for payment in payments:
                         action_space[j] = {
                             "type": "projectCard",
@@ -259,7 +291,7 @@ class TerraformingMarsDecisionMapper:
             # For resource selection, we'll just return the default for now
             action_space[0] = self._map_select_resources(player_input)
         elif input_type=="payment":
-            payments=self._create_payment_from_input(player_input,None,None,player_state=player_state)
+            payments=self.payment_options_calculator.create_payment_from_input(player_input,None,None,player_state=player_state)
             for i,payment in enumerate(payments):
                 action_space[i] = {
                     "type":"payment",
@@ -332,7 +364,7 @@ class TerraformingMarsDecisionMapper:
         selected_card = cards[0]["name"] if cards else ""
         
         # Create payment based on available resources in the input
-        payment = self._create_payment_from_input(player_input, selected_card, cards)
+        payment = self.payment_options_calculator.create_payment_from_input(player_input, selected_card, cards)
         
         return {
             "type": "projectCard",
@@ -413,7 +445,7 @@ class TerraformingMarsDecisionMapper:
         amount = player_input.get("amount", 0)
         
         # Create basic payment with megacredits
-        payment = self._create_basic_payment(amount)
+        payment = self.payment_options_calculator.create_basic_payment(amount)
         
         return {
             "type": "payment",
@@ -521,210 +553,9 @@ class TerraformingMarsDecisionMapper:
             "type": "resources",
             "units": units
         }
+        
     
-    def _create_payment_from_input(self, player_input: Dict, selected_card: str, cards: List[Dict], player_state: Dict) -> List[Dict]:
-        """Generate all valid payment combinations for card playment based on available resources."""
-        # Find the selected card to get its cost
-        card_cost = 0
-        card_metadata={}
-        if selected_card:
-            for card in cards:
-                if card.get("name") == selected_card:
-                    card_cost = card.get("calculatedCost", 0)
-                    break
-            card_metadata=ALL_CARDS[selected_card]
-        else:
-            card_cost=player_input.get('amount')
-        
-        if card_cost <= 0:
-            return []
-        
-        
-        
-        #print(f"Player input: {player_input}")
-        # Get player's available resources
-        player_resources = {
-            "megaCredits": player_state["thisPlayer"].get("megaCredits", 0),
-            "heat": player_state["thisPlayer"].get("heat", 0),
-            "steel": player_state["thisPlayer"].get("steel", 0),
-            "titanium": player_state["thisPlayer"].get("titanium", 0),
-            "plants": player_state["thisPlayer"].get("plants", 0),
-            "microbes": player_input.get("microbes", 0),
-            "floaters": player_input.get("floaters", 0),
-            "lunaArchivesScience": player_input.get("lunaArchivesScience", 0),
-            "spireScience": player_input.get("spireScience", 0),
-            "seeds": player_input.get("seeds", 0),
-            "auroraiData": player_input.get("auroraiData", 0),
-            "graphene": player_input.get("graphene", 0),
-            "kuiperAsteroids": player_input.get("kuiperAsteroids", 0),
-            "corruption": player_input.get("corruption", 0)
-        }
-        
-        # Get resource values and payment restrictions
-        steel_value = player_state["thisPlayer"].get("steelValue", 1)
-        titanium_value = player_state["thisPlayer"].get("titaniumValue", 1)
-        #print(f"Steel value {steel_value}, titanium value={titanium_value}")
-        payment_options = player_input.get("paymentOptions", {})
-        
-        # Check if certain payment methods are restricted
-        can_use_heat = payment_options.get("heat", False)
-        can_use_steel = "building" in card_metadata.get("tags",[]) and payment_options.get("steel", False)
-        can_use_titanium = "space" in card_metadata.get("tags",[]) and payment_options.get("titanium", False)
-        can_use_plants = payment_options.get("plants", False)
-        can_use_kuiper_asteroids= player_resources['kuiperAsteroids']>0 and (
-                (selected_card=="Aquifer" or selected_card=="Asteroid:SP") 
-                and player_state['thisPlayer'].get('pickedCorporationCard')[0]=="Kuiper Cooperative"
-            )
-        
-        #print(f"can_use_heat={can_use_heat}")
-        
-        # Calculate maximum possible units for each resource type without overpaying
-        def max_resource(resource: str, value: int = 1) -> int:
-            max_possible = min(
-                player_resources[resource],
-                (card_cost + value - 1) // value  # Ceiling division to prevent overpayment
-            )
-            return max(0, max_possible)
-        
-        max_mc = max_resource("megaCredits")
-        max_heat = max_resource("heat") if can_use_heat else 0
-        max_steel = max_resource("steel", steel_value) if can_use_steel else 0
-        max_titanium = max_resource("titanium", titanium_value) if can_use_titanium else 0
-        max_plants = max_resource("plants") if can_use_plants else 0
-        
-        # Generate minimal payment combinations
-        minimal_payments = []
-        
-        # Generate base resource combinations (ordered by efficiency)
-        for mc in range(max_mc, -1, -1):
-            remaining_after_mc = card_cost - mc
-            if remaining_after_mc <= 0:
-                # Pure MC payment
-                payment = self._create_base_payment(mc, 0, 0, 0, 0)
-                minimal_payments.append(payment)
-                continue
-            
-            for ti in range(min(max_titanium, (remaining_after_mc + titanium_value - 1) // titanium_value), -1, -1):
-                remaining_after_ti = remaining_after_mc - ti * titanium_value
-                if remaining_after_ti <= 0:
-                    payment = self._create_base_payment(mc, 0, ti, 0, 0)
-                    minimal_payments.append(payment)
-                    continue
-                
-                for st in range(min(max_steel, (remaining_after_ti + steel_value - 1) // steel_value), -1, -1):
-                    remaining_after_st = remaining_after_ti - st * steel_value
-                    if remaining_after_st <= 0:
-                        payment = self._create_base_payment(mc, st, ti, 0, 0)
-                        minimal_payments.append(payment)
-                        continue
-                    
-                    for he in range(min(max_heat, remaining_after_st), -1, -1):
-                        remaining_after_he = remaining_after_st - he
-                        if remaining_after_he <= 0:
-                            payment = self._create_base_payment(mc, st, ti, he, 0)
-                            minimal_payments.append(payment)
-                            continue
-                        
-                        for pl in range(min(max_plants, remaining_after_he), -1, -1):
-                            if mc + (ti * titanium_value) + (st * steel_value) + he + pl >= card_cost:
-                                payment = self._create_base_payment(mc, st, ti, he, pl)
-                                minimal_payments.append(payment)
-        
-        # Add special resource combinations
-        extended_payments = []
-        for payment in minimal_payments:
-            extended_payments.append(payment.copy())
-            
-            # Replace MC with special resources where possible
-            remaining_mc = payment["megaCredits"]
-            for resource in ["microbes", "floaters", "lunaArchivesScience", 
-                            "spireScience", "seeds", "auroraiData", 
-                            "graphene", "kuiperAsteroids", "corruption"]:
-                if player_resources[resource] > 0:
-                    if not can_use_kuiper_asteroids and resource=="kuiperAsteroids":
-                        continue
-                    max_replace = min(player_resources[resource], remaining_mc)
-                    if max_replace > 0:
-                        new_payment = payment.copy()
-                        new_payment["megaCredits"] -= max_replace
-                        new_payment[resource] = max_replace
-                        extended_payments.append(new_payment)
-        
-        # Filter valid payments (no overpayment and within resource limits)
-        valid_payments = []
-        for payment in extended_payments:
-            total_paid = (
-                payment["megaCredits"] +
-                payment["steel"] * steel_value +
-                payment["titanium"] * titanium_value +
-                payment["heat"] +
-                payment["plants"] +
-                sum(payment[res] for res in [
-                    "microbes", "floaters", "lunaArchivesScience",
-                    "spireScience", "seeds", "auroraiData",
-                    "graphene", "kuiperAsteroids", "corruption"
-                ])
-            )
-            
-            # Check for exact payment and resource limits
-            if (total_paid == card_cost and
-                all(0 <= payment[res] <= player_resources[res] for res in player_resources)):
-                valid_payments.append(payment)
-        
-        # Remove duplicates and sort by efficiency
-        unique_payments = []
-        seen = set()
-        
-        for payment in sorted(valid_payments, key=lambda p: (
-            p["megaCredits"],  # Prefer fewer MC
-            -p["titanium"],    # Prefer more titanium (higher value)
-            -p["steel"],       # Prefer more steel
-            p["heat"],        # Prefer less heat
-            p["plants"]       # Prefer less plants
-        )):
-            payment_tuple = tuple(sorted(payment.items()))
-            if payment_tuple not in seen:
-                seen.add(payment_tuple)
-                unique_payments.append(payment)
-        
-        return unique_payments
-    def _create_base_payment(self, mc: int, st: int, ti: int, he: int, pl: int) -> Dict:
-        """Create a base payment dictionary with special resources set to 0."""
-        return {
-            "megaCredits": mc,
-            "steel": st,
-            "titanium": ti,
-            "heat": he,
-            "plants": pl,
-            "microbes": 0,
-            "floaters": 0,
-            "lunaArchivesScience": 0,
-            "spireScience": 0,
-            "seeds": 0,
-            "auroraiData": 0,
-            "graphene": 0,
-            "kuiperAsteroids": 0,
-            "corruption": 0
-        }
-    
-    def _create_basic_payment(self, amount: int) -> Dict[str, Any]:
-        """Create a basic payment object with the specified amount in megacredits."""
-        return {
-            "megaCredits": amount,
-            "heat": 0,
-            "steel": 0,
-            "titanium": 0,
-            "plants": 0,
-            "microbes": 0,
-            "floaters": 0,
-            "lunaArchivesScience": 0,
-            "spireScience": 0,
-            "seeds": 0,
-            "auroraiData": 0,
-            "graphene": 0,
-            "kuiperAsteroids": 0,
-            "corruption": 0
-        }
+
     
     def _choose_or_option_strategically(self, options: List[Dict], default_index: int) -> int:
         """Choose an option based on strategy preference. Override this method for custom logic."""
