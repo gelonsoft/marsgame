@@ -1,3 +1,4 @@
+import string
 from time import sleep
 import time
 import traceback
@@ -80,7 +81,7 @@ def post_player_input(run_id,player_id, player_input_model):
         return resp
     except Exception as e:
         print(f"Bad post_player_input response:\n{response.text}\npayload:\n{json.dumps(player_input_model)}\n")
-        return None
+        return response
 
 def start_new_game(num_players):
     
@@ -311,7 +312,15 @@ class TerraformingMarsEnv(ParallelEnv):
                 res=self.post_player_input(agent, player_input)
                 if res is None:
                     print(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
-                    raise Exception("Bad player actions")
+                    with open(os.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'wb',encoding='utf-8') as f:
+                        f.write(json.dumps({
+                            "player_link": f"{SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}",
+                            "player_id": self.agent_id_to_player_id[agent],
+                            "error": res.text,
+                            "player_input":player_input,
+                            "player_state":self.player_states[agent]
+                        }))
+                    #raise Exception("Bad player actions")
                     player_input=None
 
             self.rewards[agent] = 1.0 if player_input else -1.0
@@ -322,8 +331,8 @@ class TerraformingMarsEnv(ParallelEnv):
         max_actions=max([len(self.action_lookup[agent].keys()) for agent in self.agents])
         is_terminate=False
         if max_actions==0:
-            for _ in range(3):
-                print(f"Warning, no actions: waiting 1 second and checking again... max_actions={max_actions}, actions={[len(self.action_lookup[agent].keys()) for agent in self.agents]}")
+            for ii in range(3):
+                print(f"Warning {ii}, no actions: waiting 1 second and checking again... max_actions={max_actions}, actions={[len(self.action_lookup[agent].keys()) for agent in self.agents]}")
 
                 if all([self.player_states[agent].get('game',{}).get('phase',"")=="end" for agent in self.agents]):
                     print("End game detected. Terminating...")
@@ -338,7 +347,18 @@ class TerraformingMarsEnv(ParallelEnv):
                         break
         
         if max_actions==0 and not is_terminate:
-            raise Exception(f"No steps players={[self.agent_id_to_player_id[agent] for agent in self.agents]}")
+            for agent in self.agents:
+                with open(os.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'wb',encoding='utf-8') as f:
+                    f.write(json.dumps({
+                        "player_link": f"{SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}",
+                        "player_id": self.agent_id_to_player_id[agent],
+                        "error": "No steps",
+                        "player_input":player_input,
+                        "player_state":self.player_states[agent]
+                    }))
+            self.terminations = {agent: True for agent in self.agents}
+            print(f"No steps players={[self.agent_id_to_player_id[agent] for agent in self.agents]}")
+            #raise Exception(f"No steps players={[self.agent_id_to_player_id[agent] for agent in self.agents]}")
 
 
         # Placeholder reward logic

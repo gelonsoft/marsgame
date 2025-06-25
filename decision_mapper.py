@@ -94,10 +94,8 @@ class TerraformingMarsDecisionMapper:
             is_limited_amount=len(options)>0
             for opt in options:
                 is_limited_amount &=((opt.get('buttonLabel') in ["Select"]) or ('Spend' in opt.get('buttonLabel'))) and opt.get('type')=="amount"
-            
             #print(f"is_limited_amount={is_limited_amount}")
             k=0
-            
             for i, indices in enumerate(action_indices):
                 #print(f"i={i} indices={indices}")
                 responses=[]
@@ -109,13 +107,7 @@ class TerraformingMarsDecisionMapper:
                         r=sub_action_spaces[j][idx]
                     #print(f"sub_action_spaces={sub_action_spaces}")
                     #print(f"r={r} sub_action_spaces[{j}][{idx}]={sub_action_spaces[j][idx]}")
-                    responses.append(r.copy())
-                        
-                #responses = [sub_action_spaces[j][idx]["responses"][0] 
-                #            if "responses" in sub_action_spaces[j][idx] 
-                #        else sub_action_spaces[j][idx] 
-                #        ]
-                
+                    responses.append(r.copy())               
                 
                 value=0
                 
@@ -131,9 +123,14 @@ class TerraformingMarsDecisionMapper:
                     #print(player_input.get('title').get('data')[0].get('value'))
                     limit_value=int(player_input.get('title').get('data')[0].get('value'))
                     #print(f"is_limited_amount={is_limited_amount} responses={responses}")
-                    if value==limit_value:
-                        action_space[k] = {"type": "and", "responses": responses}
-                        k=k+1
+                    if isinstance(player_input.get('title',''),dict) and  player_input.get('title',{}).get('message','')=="Select how to spend ${0} heat":
+                        if value==limit_value:
+                            action_space[k] = {"type": "and", "responses": responses}
+                            k=k+1
+                    else:
+                        if value==limit_value:
+                            action_space[k] = {"type": "and", "responses": responses}
+                            k=k+1
                 else:
                     action_space[k] = {"type": "and", "responses": responses}
                     k=k+1
@@ -259,13 +256,18 @@ class TerraformingMarsDecisionMapper:
                         j+=1
                 elif input_type == "colony":
                     action_space[i] = {
-                        "type": "colony",
+                        "type": input_type,
                         "colonyName": item["name"]
                     }
                 elif input_type == "party":
                     action_space[i] = {
-                        "type": "party",
+                        "type": input_type,
                         "partyName": item
+                    }
+                elif input_type == "delegate":
+                    action_space[i] = {
+                        "type": input_type,
+                        "player": item
                     }
                 else:
                     action_space[i] = {

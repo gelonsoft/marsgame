@@ -34,7 +34,7 @@ class PaymentOptionsCalculator:
             current_payment_options.append({"resource":resource,"max":max_value,"value":1})
         return current_payment_options
     def _get_heat(self,resource,selected_card: str,card_cost: int, card_metadata: Dict,player_input: Dict, player_state: Dict,current_payment_options:List[Dict]) -> List[Dict]:
-        if "Helion" in [n.get('name') for n in player_state.get('pickedCorporationCard',[])]:
+        if "Helion" in [n.get('name') for n in player_state.get('thisPlayer',{}).get('tableau',[])]:
             player_have=player_state["thisPlayer"].get(resource, 0)
             if player_have>0:
                 max_amount=min(card_cost,player_have)
@@ -47,6 +47,12 @@ class PaymentOptionsCalculator:
                 value=player_state["thisPlayer"].get("steelValue", 1)
                 max_amount=min(card_cost//value+card_cost%value,player_have)
                 current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
+        elif player_input.get('type',"")=="payment" and player_input.get('paymentOptions',{}).get(resource):
+            player_have=player_state["thisPlayer"].get(resource, 0)
+            if player_have>0:
+                value=player_state["thisPlayer"].get(resource+"Value", 1)
+                max_amount=min(card_cost//value+card_cost%value,player_have)
+                current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
         return current_payment_options
     def _get_titanium(self,resource,selected_card: str,card_cost: int, card_metadata: Dict,player_input: Dict, player_state: Dict,current_payment_options:List[Dict]) -> List[Dict]:
         #print(f"Player input: {player_input} {'title' in player_input} {player_input.get('title',"a") is dict}")
@@ -56,7 +62,7 @@ class PaymentOptionsCalculator:
                 value=player_state["thisPlayer"].get("titaniumValue", 1)
                 max_amount=min(card_cost//value+card_cost%value,player_have)
                 current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
-        elif "Luna Trade Federation" in [n.get('name') for n in player_state.get('pickedCorporationCard',[])]:
+        elif "Luna Trade Federation" in [n.get('name') for n in player_state.get('thisPlayer',{}).get('tableau',[])]:
             player_have=player_state["thisPlayer"].get(resource, 0)
             if player_have>0:
                 value=2
@@ -65,13 +71,13 @@ class PaymentOptionsCalculator:
         elif (('title' in player_input) and (isinstance(player_input.get('title',"a"), dict)) and ("Directed Impactors"==player_input.get('title',{}).get('data',[{"value":None}])[0].get('value',None))):
             player_have=player_state["thisPlayer"].get(resource, 0)
             if player_have>0:
-                value=player_state["thisPlayer"].get("titaniumValue", 1)
+                value=player_state["thisPlayer"].get(resource+"Value", 1)
                 max_amount=min(card_cost//value+card_cost%value,player_have)
                 current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
-        elif player_input.get('type',"")=="payment" and player_input.get('paymentOptions',{}).get('titanium'):
+        elif player_input.get('type',"")=="payment" and player_input.get('paymentOptions',{}).get(resource):
             player_have=player_state["thisPlayer"].get(resource, 0)
             if player_have>0:
-                value=player_state["thisPlayer"].get("titaniumValue", 1)
+                value=player_state["thisPlayer"].get(resource+"Value", 1)
                 max_amount=min(card_cost//value+card_cost%value,player_have)
                 current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
         return current_payment_options
@@ -111,7 +117,7 @@ class PaymentOptionsCalculator:
                     current_payment_options.append({"resource":resource,"max":max_amount,"value":1})
         return current_payment_options
     def _get_spireScience(self,resource,selected_card: str,card_cost: int, card_metadata: Dict,player_input: Dict, player_state: Dict,current_payment_options:List[Dict]) -> List[Dict]:
-        if "Spire" in [n.get('name') for n in player_state.get('pickedCorporationCard',[])] and card_metadata.get('type','')=="standard_project":
+        if "Spire" in [n.get('name') for n in player_state.get('thisPlayer',{}).get('tableau',[])] and card_metadata.get('type','')=="standard_project":
             player_have=player_input.get(resource, 0)
             if player_have>0:
                 value=2
@@ -119,7 +125,7 @@ class PaymentOptionsCalculator:
                 current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
         return current_payment_options
     def _get_seeds(self,resource,selected_card: str,card_cost: int, card_metadata: Dict,player_input: Dict, player_state: Dict,current_payment_options:List[Dict]) -> List[Dict]:
-        if "Soylent Seedling Systems" in [n.get('name') for n in player_state.get('pickedCorporationCard',[])] and (selected_card=="Greenery" or "plant" in card_metadata.get("tags",[])):
+        if "Soylent Seedling Systems" in [n.get('name') for n in player_state.get('thisPlayer',{}).get('tableau',[])] and (selected_card=="Greenery" or "plant" in card_metadata.get("tags",[])):
             player_have=player_input.get(resource, 0)
             if player_have>0:
                 value=5
@@ -127,7 +133,7 @@ class PaymentOptionsCalculator:
                 current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
         return current_payment_options
     def _get_auroraiData(self,resource,selected_card: str,card_cost: int, card_metadata: Dict,player_input: Dict, player_state: Dict,current_payment_options:List[Dict]) -> List[Dict]:
-        if "Aurorai" in [n.get('name') for n in player_state.get('pickedCorporationCard',[])] and card_metadata.get('type','')=="standard_project":
+        if "Aurorai" in [n.get('name') for n in player_state.get('thisPlayer',{}).get('tableau',[])] and card_metadata.get('type','')=="standard_project":
             player_have=player_input.get(resource, 0)
             if player_have>0:
                 value=3
