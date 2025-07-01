@@ -307,7 +307,7 @@ class TerraformingMarsEnv(ParallelEnv):
             action=actions[agent]
             if action==0:
                 self.dones[agent] = True
-                self.rewards[agent] = 1 if len(self.action_lookup[agent].keys())<=0 else -1
+                self.rewards[agent] = -5 if len(self.action_lookup[agent].keys())<=0 else -7
                 continue
             
             
@@ -330,12 +330,21 @@ class TerraformingMarsEnv(ParallelEnv):
                         }))
                     #raise Exception("Bad player actions")
                     player_input=None
+                    self.rewards[agent]=-5
+                else:
                     self.rewards[agent]=0
 
             self.dones[agent] = True
 
         self._update_all_observations()
         for agent in self.agents:
+            if self.rewards[agent]<0:
+                if self.rewards[agent]==-5:
+                    self.rewards[agent]=0.0
+                elif self.rewards[agent]==-7:
+                    self.rewards[agent]=-1.0
+                continue
+            
             try:
                 self.rewards[agent]=int(self.player_states[agent]['thisPlayer']['victoryPointsBreakdown']['total'])/1000
                 self.rewards[agent]=self.rewards[agent]
