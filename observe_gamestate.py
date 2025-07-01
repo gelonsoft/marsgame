@@ -3,7 +3,7 @@ from typing import Dict, Any, List
 from collections import defaultdict
 import json
 from jsonpath_ng.ext import parse
-from myconfig import MAX_ACTIONS,ONE_ACTION_ARRAY_SIZE,MAX_GAME_FEATURES_SIZE
+from myconfig import MAX_ACTIONS,ONE_ACTION_ARRAY_SIZE,MAX_GAME_FEATURES_SIZE, TOTAL_ACTIONS
 
 with open("gs.schema.formatted.json",'rb') as f:
 #with open("gs.response.schema.lite.json",'rb') as f:
@@ -390,4 +390,4 @@ def observe(player_view_model: Dict[str, Any],available_actions: Dict[str,Any]) 
     return observation
 
 def get_actions_shape():
-    return np.zeros(MAX_ACTIONS, dtype=np.float32).shape
+    return np.zeros(TOTAL_ACTIONS, dtype=np.float32).shape

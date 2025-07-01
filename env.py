@@ -4,9 +4,9 @@ import time
 import traceback
 import numpy as np
 import json
-import gymnasium as gym
 from gymnasium import spaces
 from pettingzoo import AECEnv, ParallelEnv
+from myutils import get_stat
 try:
     from pettingzoo.utils import agent_selector
     x=agent_selector(['1','2'])
@@ -305,6 +305,13 @@ class TerraformingMarsEnv(ParallelEnv):
         acts=[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]
         for agent in actions:
             action=actions[agent]
+            if action==0:
+                self.dones[agent] = True
+                self.rewards[agent] = 0
+                continue
+            self.rewards[agent]=int(get_stat(self.player_states[agent],'thisPlayer.victoryPointsBreakdown.total'))
+            
+            action=action+1
             #print(f"Action: {action}")
             player_input = self.action_lookup[agent].get(action)
             if player_input:
@@ -322,11 +329,13 @@ class TerraformingMarsEnv(ParallelEnv):
                         }))
                     #raise Exception("Bad player actions")
                     player_input=None
+                    self.rewards[agent]+1
 
-            self.rewards[agent] = 1.0 if player_input else -1.0
             self.dones[agent] = True
 
         self._update_all_observations()
+        
+        
         
         max_actions=max([len(self.action_lookup[agent].keys()) for agent in self.agents])
         is_terminate=False
