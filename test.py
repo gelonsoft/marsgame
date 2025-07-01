@@ -1,5 +1,5 @@
 import numpy as np
-from env import TerraformingMarsEnv
+from env import SERVER_BASE_URL, TerraformingMarsEnv
 import json 
 import random
 import pyarrow as pa
@@ -28,22 +28,24 @@ MAX_ROWS=10000
 num_actions=env.observation_space(env.possible_agents[0]).shape[0]
 
 result=np.zeros((MAX_ROWS,num_actions),dtype=np.float32)
-rand=random.Random()
+rand=random.Random(42)
 i=0
 next_obs, rewards, terms, truncs, infos=(None,None,None,None,None)
 while True:
     actions={}
     is_no_actions=True
     for agent in env.action_lookup:
-        max_actions=len(env.action_lookup[agent].keys())
+        max_actions=len(env.action_lookup[agent].keys())+1
+        
         if max_actions>1:
-            actions[agent]=int(rand.randrange(0,max_actions-1))
+            actions[agent]=rand.randint(0,max_actions-1)
             is_no_actions=False
-        elif max_actions==0:
+        elif max_actions==1:
             actions[agent]=0
         else:
             is_no_actions=False
             actions[agent]=0
+        #print(f"F {agent}:{actions[agent]}/{max_actions}")
     if terms and terms.get('1',False):
         terms=None
         env=TerraformingMarsEnv(["1","2"])
@@ -61,4 +63,6 @@ while True:
             break   
         print(f"Encoder data step done {i}")
 
+for agent in env.agents:
+    print(f"player_link={SERVER_BASE_URL}/player?id={env.agent_id_to_player_id[agent]}")
 np.save("test.npy",result)

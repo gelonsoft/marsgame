@@ -115,7 +115,7 @@ def start_new_game(num_players):
         "venus": True,
         "colonies": True,
         "prelude": True,
-        "prelude2": False,
+        "prelude2": True,
         "turmoil": True,
         "community": False,
         "ares": False,
@@ -126,19 +126,19 @@ def start_new_game(num_players):
         "underworld": False
     },
     "draftVariant": True,
-    "showOtherPlayersVP": False,
+    "showOtherPlayersVP": True,
     "customCorporationsList": [],
     "customColoniesList": [],
     "customPreludes": [],
     "bannedCards": [],
     "includedCards": [],
     "board": "tharsis",
-    "seed": random.random() ,
+    "seed": random.random(),
     "solarPhaseOption": True,
     "aresExtremeVariant": False,
     "politicalAgendasExtension": "Standard",
     "undoOption": False,
-    "showTimers": True,
+    "showTimers": False,
     "fastModeOption": False,
     "removeNegativeGlobalEventsOption": False,
     "includeFanMA": False,
@@ -307,15 +307,16 @@ class TerraformingMarsEnv(ParallelEnv):
             action=actions[agent]
             if action==0:
                 self.dones[agent] = True
-                self.rewards[agent] = 0
+                self.rewards[agent] = 1 if len(self.action_lookup[agent].keys())<=0 else -1
                 continue
-            self.rewards[agent]=int(get_stat(self.player_states[agent],'thisPlayer.victoryPointsBreakdown.total'))
             
-            action=action+1
-            #print(f"Action: {action}")
+            
+            action=action-1
+            
             player_input = self.action_lookup[agent].get(action)
+            #print(f"Action: {action}/{len(self.action_lookup[agent].keys())} player_input={player_input}")
             if player_input:
-                #print(f"Agent {agent} selected input: {player_input.get('type')}")
+                #print(f"Agent {agent} selected input: {player_input}")
                 res=self.post_player_input(agent, player_input)
                 if res is None:
                     print(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
@@ -329,13 +330,23 @@ class TerraformingMarsEnv(ParallelEnv):
                         }))
                     #raise Exception("Bad player actions")
                     player_input=None
-                    self.rewards[agent]+1
+                    self.rewards[agent]=0
 
             self.dones[agent] = True
 
         self._update_all_observations()
-        
-        
+        for agent in self.agents:
+            try:
+                self.rewards[agent]=int(self.player_states[agent]['thisPlayer']['victoryPointsBreakdown']['total'])/1000
+                self.rewards[agent]=self.rewards[agent]
+                if self.rewards[agent]>1:
+                    self.rewards[agent]=1.0
+                if self.rewards[agent]<-1:
+                    self.rewards[agent]=-1
+                #print(f"VP={self.player_states[agent]['thisPlayer']['victoryPointsBreakdown']}")
+            except Exception as e:
+                #print(f"Exception vp= {e}")
+                self.rewards[agent]=0
         
         max_actions=max([len(self.action_lookup[agent].keys()) for agent in self.agents])
         is_terminate=False

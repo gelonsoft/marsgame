@@ -3,3 +3,4 @@ __pycache__/
 tm_cards.html
 debug/
 runs/
+test.npy
