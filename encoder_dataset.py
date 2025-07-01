@@ -30,7 +30,7 @@ rand=random.Random()
 i=0
 next_obs, rewards, terms, truncs, infos=(None,None,None,None,None)
 with open("encoder_train.csv","w") as f:
-    f.write(','.join(['a'+j for j in range(observation_space_num)])+"\n")
+    f.write(','.join(['a'+str(j) for j in range(observation_space_num)])+"\n")
     while True:
         actions={}
         is_no_actions=True
