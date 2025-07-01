@@ -65,4 +65,5 @@ while True:
 
 for agent in env.agents:
     print(f"player_link={SERVER_BASE_URL}/player?id={env.agent_id_to_player_id[agent]}")
+    
 np.save("test.npy",result)
