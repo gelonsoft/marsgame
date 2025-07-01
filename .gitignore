@@ -3,4 +3,4 @@ __pycache__/
 tm_cards.html
 debug/
 runs/
-test.npy
+encoder_train.csv

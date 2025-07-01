@@ -27,7 +27,7 @@ env=TerraformingMarsEnv(["1","2"])
 MAX_ROWS=10000
 num_actions=env.observation_space(env.possible_agents[0]).shape[0]
 
-result=np.zeros((MAX_ROWS,num_actions),dtype=np.float32)
+with open("")
 rand=random.Random()
 i=0
 next_obs, rewards, terms, truncs, infos=(None,None,None,None,None)
