@@ -24,8 +24,10 @@ import pyarrow as pa
 
 
 env=TerraformingMarsEnv(["1","2"])
-MAX_ROWS=10240
-result=np.zeros((MAX_ROWS,env.action_space(env.possible_agents[0]).shape[0]))
+MAX_ROWS=5
+num_actions=env.observation_space(env.possible_agents[0]).shape[0]
+
+result=np.zeros((MAX_ROWS,num_actions),dtype=np.float32)
 rand=random.Random()
 i=0
 next_obs, rewards, terms, truncs, infos=(None,None,None,None,None)
@@ -57,6 +59,6 @@ while True:
         if i>=MAX_ROWS:
             print("Done")
             break   
+        print(f"Encoder data step done {i}")
 
-pa_table = pa.table({"data": result})
-pa.parquet.write_table(pa_table, "test.parquet")
+np.save("test.npy",result)
