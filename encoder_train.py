@@ -49,7 +49,7 @@ class StateAutoencoder(nn.Module):
         return self.encoder(x)
     
 INPUT_DIM=0
-csv_path = "big_file.csv"
+csv_path = "encoder_train.csv"
 temp_dataset = StreamingCSVDataset(csv_path)
 sample_data = temp_dataset.get_sample_for_scaler()
 scaler = MinMaxScaler()
@@ -62,8 +62,8 @@ device='cpu'
 
 # Setup
 
-latent_dim = 256  # you can tune this
-autoencoder = StateAutoencoder(input_dim=sample_data.shape[1], latent_dim=16)
+latent_dim = 512  # you can tune this
+autoencoder = StateAutoencoder(input_dim=sample_data.shape[1], latent_dim=latent_dim)
 optimizer = torch.optim.Adam(autoencoder.parameters(), lr=1e-3)
 loss_fn = torch.nn.MSELoss()
 
