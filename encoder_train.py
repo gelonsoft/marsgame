@@ -8,7 +8,7 @@ from torch.utils.data import TensorDataset, DataLoader, IterableDataset
 import torch.optim as optim
 
 class StreamingCSVDataset(IterableDataset):
-    def __init__(self, filename, scaler=None, skip_header=True, chunk_size=1024):
+    def __init__(self, filename, scaler=None, skip_header=True, chunk_size=100):
         self.filename = filename
         self.scaler = scaler
         self.skip_header = skip_header
