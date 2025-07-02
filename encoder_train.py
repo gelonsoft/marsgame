@@ -1,3 +1,4 @@
+print("Started 0 ",flush=True)
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
@@ -48,13 +49,13 @@ class StateAutoencoder(nn.Module):
     def encode(self, x):
         return self.encoder(x)
     
-print("Started")
+print("Started",flush=True)
 INPUT_DIM=0
 csv_path = "encoder_train.csv"
 temp_dataset = StreamingCSVDataset(csv_path)
-print("StreamingCSVDataset")
+print("StreamingCSVDataset",flush=True)
 sample_data = temp_dataset.get_sample_for_scaler()
-print("sample_data")
+print("sample_data",flush=True)
 temp_dataset=None
 
 scaler = MinMaxScaler()
@@ -63,7 +64,7 @@ input_dim=sample_data.shape[1]
 sample_data=None
 streaming_dataset = StreamingCSVDataset(csv_path, scaler=scaler)
 dataloader = DataLoader(streaming_dataset, batch_size=64)
-print("Data loaded")
+print("Data loaded",flush=True)
 
 device='cpu'
 
@@ -74,11 +75,11 @@ autoencoder = StateAutoencoder(input_dim=input_dim, latent_dim=latent_dim)
 optimizer = torch.optim.Adam(autoencoder.parameters(), lr=1e-3)
 loss_fn = torch.nn.MSELoss()
 
-print("Training started")
+print("Training started",flush=True)
 for epoch in range(100):
     total_loss = 0
     for batch in dataloader:
-        print(".",end=None)
+        print(".",end=None,flush=True)
         x = batch
         x_recon = autoencoder(x)
         loss = loss_fn(x_recon, x)
@@ -88,9 +89,10 @@ for epoch in range(100):
         optimizer.step()
 
         total_loss += loss.item()
-    print(f"\nEpoch {epoch+1}, Loss: {total_loss:.4f}")
+    print(f"\nEpoch {epoch+1}, Loss: {total_loss:.4f}",flush=True)
 
 torch.save(autoencoder.state_dict(), "state_autoencoder.pth")
+print("Done",flush=True)
 #autoencoder.load_state_dict(torch.load("state_autoencoder.pth"))
 #autoencoder.eval()
 #with torch.no_grad():
