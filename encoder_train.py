@@ -22,7 +22,7 @@ class StreamingCSVDataset(IterableDataset):
             for row in data:
                 yield torch.tensor(row)
 
-    def get_sample_for_scaler(self, sample_rows=1000):
+    def get_sample_for_scaler(self, sample_rows=100):
         df = pd.read_csv(self.filename, nrows=sample_rows)
         return df.to_numpy().astype(np.float32)
     
@@ -48,12 +48,19 @@ class StateAutoencoder(nn.Module):
     def encode(self, x):
         return self.encoder(x)
     
+print("Started")
 INPUT_DIM=0
 csv_path = "encoder_train.csv"
 temp_dataset = StreamingCSVDataset(csv_path)
+print("StreamingCSVDataset")
 sample_data = temp_dataset.get_sample_for_scaler()
+print("sample_data")
+temp_dataset=None
+
 scaler = MinMaxScaler()
 scaler.fit(sample_data)
+input_dim=sample_data.shape[1]
+sample_data=None
 streaming_dataset = StreamingCSVDataset(csv_path, scaler=scaler)
 dataloader = DataLoader(streaming_dataset, batch_size=64)
 print("Data loaded")
@@ -63,13 +70,15 @@ device='cpu'
 # Setup
 
 latent_dim = 512  # you can tune this
-autoencoder = StateAutoencoder(input_dim=sample_data.shape[1], latent_dim=latent_dim)
+autoencoder = StateAutoencoder(input_dim=input_dim, latent_dim=latent_dim)
 optimizer = torch.optim.Adam(autoencoder.parameters(), lr=1e-3)
 loss_fn = torch.nn.MSELoss()
 
-for epoch in range(10):
+print("Training started")
+for epoch in range(100):
     total_loss = 0
     for batch in dataloader:
+        print(".",end=None)
         x = batch
         x_recon = autoencoder(x)
         loss = loss_fn(x_recon, x)
@@ -79,11 +88,11 @@ for epoch in range(10):
         optimizer.step()
 
         total_loss += loss.item()
-
-    print(f"Epoch {epoch+1}, Loss: {total_loss:.4f}")
+    print(f"\nEpoch {epoch+1}, Loss: {total_loss:.4f}")
 
 torch.save(autoencoder.state_dict(), "state_autoencoder.pth")
 #autoencoder.load_state_dict(torch.load("state_autoencoder.pth"))
 #autoencoder.eval()
 #with torch.no_grad():
 #    compressed_data = autoencoder.encode(tensor_data).numpy()
+#git pull ; docker run --rm --name tms-bot-train -v $(pwd):/data -e SERVER_BASE_URL="${SERVER_BASE_URL}" -e START_LR="${START_LR}" -e CONTINUE_TRAIN="${CONTINUE_TRAIN}" -e MODEL_PATH="${MODEL_PATH}" -e RUN_NAME="${RUN_NAME}"  terraforming-mars-bot:latest  python3 encoder_train.py
