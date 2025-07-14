@@ -8,7 +8,7 @@ from torch.utils.data import TensorDataset, DataLoader, IterableDataset
 import torch.optim as optim
 
 class StreamingCSVDataset(IterableDataset):
-    def __init__(self, filename, scaler=None, skip_header=True, chunk_size=100):
+    def __init__(self, filename, scaler=None, skip_header=True, chunk_size=50):
         self.filename = filename
         self.scaler = scaler
         self.skip_header = skip_header
@@ -90,8 +90,7 @@ for epoch in range(100):
 
         total_loss += loss.item()
     print(f"\nEpoch {epoch+1}, Loss: {total_loss:.4f}",flush=True)
-
-torch.save(autoencoder.state_dict(), "state_autoencoder.pth")
+    torch.save(autoencoder.state_dict(), "state_autoencoder.pth")
 print("Done",flush=True)
 #autoencoder.load_state_dict(torch.load("state_autoencoder.pth"))
 #autoencoder.eval()
