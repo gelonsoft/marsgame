@@ -5,6 +5,7 @@ from sklearn.preprocessing import MinMaxScaler
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader, IterableDataset
+from torch.optim.lr_scheduler import StepLR
 import torch.optim as optim
 
 class StreamingCSVDataset(IterableDataset):
@@ -70,9 +71,11 @@ device='cpu'
 
 # Setup
 
+START_LR=1e-3
 latent_dim = 512  # you can tune this
 autoencoder = StateAutoencoder(input_dim=input_dim, latent_dim=latent_dim)
-optimizer = torch.optim.Adam(autoencoder.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(autoencoder.parameters(), lr=START_LR)
+scheduler = StepLR(optimizer, step_size=30,gamma=0.1)
 loss_fn = torch.nn.MSELoss()
 
 print("Training started",flush=True)
@@ -87,6 +90,7 @@ for epoch in range(100):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         total_loss += loss.item()
     print(f"\nEpoch {epoch+1}, Loss: {total_loss:.4f}",flush=True)
