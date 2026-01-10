@@ -14,7 +14,7 @@ except:
     from pettingzoo.utils import AgentSelector
     x=AgentSelector(['1','2'])
 from typing import List, Dict
-from myconfig import MAX_ACTIONS
+from myconfig import GAME_START_JSON, MAX_ACTIONS
 from observe_gamestate import get_actions_shape, observe  # assuming observe() is defined in another module
 import requests
 import random
@@ -24,7 +24,7 @@ import os
 
 logging.basicConfig(level=logging.INFO)  # Set the logging level to DEBUG
 
-SERVER_BASE_URL=os.environ.get('SERVER_BASE_URL',"http://lev-rworker-3:9976")
+SERVER_BASE_URL=os.environ.get('SERVER_BASE_URL','http://localhost:9976') #,"http://lev-rworker-3:9976")
 
 request_number=0
 request_responses={}
@@ -92,76 +92,7 @@ def start_new_game(num_players):
         logging.debug(f"Request url={url} {num_players} request_mock={request_responses[str(request_number)]['request']}")
         request_number+=1
         return response
-    response = requests.put(url, json={
-    "players": [
-        {
-            "name": "Red",
-            "color": "red",
-            "beginner": False,
-            "handicap": 0,
-            "first": False
-        },
-        {
-            "name": "Green",
-            "color": "green",
-            "beginner": False,
-            "handicap": 0,
-            "first": False
-        }
-    ],
-    "expansions": {
-        "corpera": True,
-        "promo": True,
-        "venus": True,
-        "colonies": True,
-        "prelude": True,
-        "prelude2": True,
-        "turmoil": True,
-        "community": False,
-        "ares": False,
-        "moon": False,
-        "pathfinders": False,
-        "ceo": False,
-        "starwars": False,
-        "underworld": False
-    },
-    "draftVariant": True,
-    "showOtherPlayersVP": True,
-    "customCorporationsList": [],
-    "customColoniesList": [],
-    "customPreludes": [],
-    "bannedCards": [],
-    "includedCards": [],
-    "board": "tharsis",
-    "seed": random.random(),
-    "solarPhaseOption": True,
-    "aresExtremeVariant": False,
-    "politicalAgendasExtension": "Standard",
-    "undoOption": False,
-    "showTimers": False,
-    "fastModeOption": False,
-    "removeNegativeGlobalEventsOption": False,
-    "includeFanMA": False,
-    "modularMA": False,
-    "startingCorporations": 2,
-    "soloTR": False,
-    "initialDraft": False,
-    "preludeDraftVariant": True,
-    "randomMA": "No randomization",
-    "shuffleMapOption": False,
-    "randomFirstPlayer": True,
-    "requiresVenusTrackCompletion": False,
-    "requiresMoonTrackCompletion": False,
-    "moonStandardProjectVariant": False,
-    "moonStandardProjectVariant1": False,
-    "altVenusBoard": False,
-    "escapeVelocityMode": False,
-    "escapeVelocityBonusSeconds": 2,
-    "twoCorpsVariant": False,
-    "customCeos": [],
-    "startingCeos": 3,
-    "startingPreludes": 4
-})
+    response = requests.put(url, json=GAME_START_JSON)
     response.raise_for_status()
     response_json=response.json()
     if LOG_REQUESTS:
@@ -320,7 +251,7 @@ class TerraformingMarsEnv(ParallelEnv):
                 res=self.post_player_input(agent, player_input)
                 if res is None:
                     print(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
-                    with open(os.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'wb',encoding='utf-8') as f:
+                    with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'wb',encoding='utf-8') as f:
                         f.write(json.dumps({
                             "player_link": f"{SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}",
                             "player_id": self.agent_id_to_player_id[agent],
@@ -377,7 +308,7 @@ class TerraformingMarsEnv(ParallelEnv):
         
         if max_actions==0 and not is_terminate:
             for agent in self.agents:
-                with open(os.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'wb',encoding='utf-8') as f:
+                with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'wb',encoding='utf-8') as f:
                     f.write(json.dumps({
                         "player_link": f"{SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}",
                         "player_id": self.agent_id_to_player_id[agent],

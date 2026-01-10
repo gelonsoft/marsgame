@@ -27,7 +27,7 @@ env=TerraformingMarsEnv(["1","2"])
 MAX_ROWS=10000
 num_actions=env.observation_space(env.possible_agents[0]).shape[0]
 
-with open("")
+#with open("")
 rand=random.Random()
 i=0
 next_obs, rewards, terms, truncs, infos=(None,None,None,None,None)
@@ -51,12 +51,12 @@ while True:
         env=TerraformingMarsEnv(["1","2"])
     else:
         next_obs, rewards, terms, truncs, infos=env.step(actions)
-        result[i]=next_obs['1']
+        #result[i]=next_obs['1']
         i+=1
         if i>=MAX_ROWS:
             print("Done")
             break
-        result[i]=next_obs['2']
+        #result[i]=next_obs['2']
         i+=1
         if i>=MAX_ROWS:
             print("Done")
@@ -66,4 +66,4 @@ while True:
 for agent in env.agents:
     print(f"player_link={SERVER_BASE_URL}/player?id={env.agent_id_to_player_id[agent]}")
     
-np.save("test.npy",result)
+#np.save("test.npy",result)
