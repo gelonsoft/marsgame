@@ -15,13 +15,14 @@ from torch.utils.tensorboard import SummaryWriter
 
 from env import parallel_env
 
+os.environ['CUDA_PATH']='e:/PC/cuda126'
 continue_train=os.getenv('CONTINUE_TRAIN', 'False') == 'True'
 model_path=os.getenv('MODEL_PATH', 'ppo_model.pt') 
 run_name=os.getenv('RUN_NAME', '')
 if run_name=="":
     run_name=''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
-batch_size = int(os.getenv('BATCH_SIZE', "32"))
-max_cycles = int(os.getenv('MAX_CYCLES', "100"))
+batch_size = int(os.getenv('BATCH_SIZE', "512"))
+max_cycles = int(os.getenv('MAX_CYCLES', "1000"))
 total_episodes = int(os.getenv('TOTAL_EPISODES', "1000"))
 start_lr=float(os.getenv('START_LR', 0.001))
 save_last_n=int(os.getenv('SAVE_LAST_N', 5))
@@ -149,7 +150,7 @@ def batchify(x, device):
 def unbatchify(x, env):
     """Converts np array to PZ style arguments."""
     x = x.cpu().numpy()
-    x = {a: x[i] for i, a in enumerate(env.possible_agents)}
+    x = {a: int(x[i]) for i, a in enumerate(env.possible_agents)}
 
     return x
 

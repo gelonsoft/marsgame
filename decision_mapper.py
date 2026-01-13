@@ -3,8 +3,10 @@ from typing import Dict, List, Any, Union, Optional, Tuple
 from dataclasses import dataclass
 from itertools import product
 import logging
+from uuid import uuid4
   # Set the logging level to
 from myconfig import ALL_CARDS
+from myutils import find_first_with_nested_attr
 from payment_options_calculator import PaymentOptionsCalculator
 
    
@@ -63,7 +65,7 @@ class TerraformingMarsDecisionMapper:
         
         return mapping_functions[input_type](player_input)
     
-    def generate_action_space(self, player_input: Dict[str, Any],player_state: Dict[str, Any], is_main=True) -> Dict[int, Dict[str, Any]]:
+    def generate_action_space(self, player_input: Dict[str, Any],player_state: Dict[str, Any], is_main=True,original_player_input:Union[Dict[str,Any],None]=None) -> Dict[int, Dict[str, Any]]:
         
         if player_input is None:
             return {}
@@ -77,6 +79,46 @@ class TerraformingMarsDecisionMapper:
             Dictionary mapping action numbers to InputResponse objects
         """
         action_space = {}
+        cards_in_hand=[]
+        if player_state and 'cardsInHand' in player_state:
+            cards_in_hand=[c['name'] for c in player_state['cardsInHand']]
+        if original_player_input is not None:
+            i=0
+            first_deffered_action=find_first_with_nested_attr(original_player_input,"__deferred_action")
+            if first_deffered_action is not None:
+                parent,deffered=first_deffered_action
+                if deffered['xtype']=="xcard_choose":
+                    selected_cards=deffered.get('selected',[])
+                    if len(selected_cards)>=deffered['xmin']:
+                        action_space[i]={
+                                "type":"deffered",
+                                "xid":deffered["xid"],
+                                "xtype":'xconfirm_card_choose'
+                        }
+                        i=i+1
+                    for c in deffered['xoptions']:
+                        if c not in selected_cards:
+                            action_space[i]={
+                                "type":"deffered",
+                                "xid":deffered["xid"],
+                                "xtype":deffered["xtype"],
+                                "xoption":c
+                            }
+                            i=i+1
+                elif deffered['xtype']=="xpayment":
+                    for p in deffered['xoptions']:
+                        action_space[i]={
+                            "type":"deffered",
+                            "xid":deffered["xid"],
+                            "xtype":deffered["xtype"],
+                            "xoption":p
+                        }
+                        i=i+1
+                return action_space
+            else:
+                raise Exception("Bad first_deffered_action")
+
+
         input_type = player_input.get("type")
         if input_type == "and":
             # For AND options, we need to generate combinations of all sub-options
@@ -193,17 +235,29 @@ class TerraformingMarsDecisionMapper:
             
             min_cards = player_input.get("min", 0)
             max_cards = player_input.get("max", len(cards))
-            
-            # Generate all possible combinations of cards
-            action_num = 0
-            for n in range(min_cards, max_cards + 1):
-                from itertools import combinations
-                for combo in combinations(cards, n):
-                    action_space[action_num] = {
-                        "type": "card",
-                        "cards": [card["name"] for card in combo]
+            #print(f"cards in card: {[card['name'] for card in cards]}")
+            if len(cards)>0:
+                action_space[0]={
+                    "type": "card",
+                    "cards":{"__deferred_action": {
+                                    "xid":str(uuid4()),
+                                    "xtype": "xcard_choose",
+                                    "xoptions":cards,
+                                    "xmin":min_cards,
+                                    "xmax":max_cards
+                                }
                     }
-                    action_num += 1
+                }
+            # Generate all possible combinations of cards
+            #action_num = 0
+            #for n in range(min_cards, max_cards + 1):
+            #    from itertools import combinations
+            #    for combo in combinations(cards, n):
+            #        action_space[action_num] = {
+            #            "type": "card",
+            #            "cards": [card["name"] for card in combo]
+            #        }
+            #        action_num += 1
         
         elif input_type == "amount":
             # For amount selection, each possible amount is a separate action
@@ -245,15 +299,23 @@ class TerraformingMarsDecisionMapper:
             j=0
             for i, item in enumerate(items):
                 if input_type == "projectCard":
+                    #if item['name'] in cards_in_hand:
+                    #    continue
                     payments = self.payment_options_calculator.create_payment_from_input(player_input, item["name"], items,player_state)
                     
-                    for payment in payments:
-                        action_space[j] = {
-                            "type": "projectCard",
-                            "card": item["name"],
-                            "payment": payment
+                    #for payment in payments:
+                    action_space[j] = {
+                        "type": "projectCard",
+                        "card": item["name"],
+                        "payment": {
+                            "__deferred_action": {
+                                "xid":str(uuid4()),
+                                "xtype": "xpayment",
+                                "xoptions":payments
+                            }
                         }
-                        j+=1
+                    }
+                    j+=1
                 elif input_type == "colony":
                     action_space[i] = {
                         "type": input_type,
@@ -294,11 +356,17 @@ class TerraformingMarsDecisionMapper:
             action_space[0] = self._map_select_resources(player_input)
         elif input_type=="payment":
             payments=self.payment_options_calculator.create_payment_from_input(player_input,None,None,player_state=player_state)
-            for i,payment in enumerate(payments):
-                action_space[i] = {
-                    "type":"payment",
-                    "payment": payment
-                }
+            #for i,payment in enumerate(payments):
+            action_space[0] = {
+                "type":"payment",
+                "payment": {
+                        "__deferred_action": {
+                            "xid":str(uuid4()),
+                            "xtype": "xpayment",
+                            "xoptions":payments
+                        }
+                    }
+            }
 
         else:
             # For other types, just return the default mapped decision

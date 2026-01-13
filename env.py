@@ -6,7 +6,7 @@ import numpy as np
 import json
 from gymnasium import spaces
 from pettingzoo import AECEnv, ParallelEnv
-from myutils import get_stat
+from myutils import find_first_with_nested_attr, get_stat
 try:
     from pettingzoo.utils import agent_selector
     x=agent_selector(['1','2'])
@@ -25,6 +25,9 @@ import os
 logging.basicConfig(level=logging.INFO)  # Set the logging level to DEBUG
 
 SERVER_BASE_URL=os.environ.get('SERVER_BASE_URL','http://localhost:9976') #,"http://lev-rworker-3:9976")
+
+global mmax_actions
+mmax_actions=5
 
 request_number=0
 request_responses={}
@@ -55,6 +58,7 @@ def get_player_state(player_id):
         #with open(os.path.join("debug",f"{request_number}.json"),"w") as f:
         #    f.write(json.dumps(response_json,indent=2))
         #logging.debug(f"Request url={url} {player_id} response:\n{json.dumps(response_json,indent=2)}")
+        #print(f"state cards in hand: {[c['name'] for c in response_json['cardsInHand']]}")
         return response_json
     except Exception as e:
         print(f"Bad get_player_state response:\n{response.text}")
@@ -62,7 +66,8 @@ def get_player_state(player_id):
 
 def post_player_input(run_id,player_id, player_input_model):
     url = f"{SERVER_BASE_URL}/player/input"
-    logging.debug(f"post_player_input Request:---\n{json.dumps(player_input_model)}\n---\n")
+    #logging.debug(f"post_player_input Request:---\n{json.dumps(player_input_model)}\n---\n")
+    print(f"post_player_input Request:---\n{json.dumps(player_input_model)}\n---\n")
     player_input_model['runId']=run_id
     global request_responses,request_number
     if USE_MOCK_SERVER:
@@ -81,7 +86,7 @@ def post_player_input(run_id,player_id, player_input_model):
         return resp
     except Exception as e:
         print(f"Bad post_player_input response:\n{response.text}\npayload:\n{json.dumps(player_input_model)}\n")
-        return response
+        return response.text
 
 def start_new_game(num_players):
     
@@ -143,6 +148,7 @@ class TerraformingMarsEnv(ParallelEnv):
         self.terminations= {agent: False for agent in self.agents}
         self.truncations = {agent: False for agent in self.agents}
         self.reset()
+        self.deffered_actions={agent: None for agent in self.agents}
         #self.player_states = {agent: get_player_state(self.agent_id_to_player_id[agent]) for agent in self.agents}
         sample_obs = self.current_obs[self.agents[0]] #observe(self.player_states[self.agents[0]],self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor")))
         self.observation_shape = sample_obs.shape
@@ -168,13 +174,30 @@ class TerraformingMarsEnv(ParallelEnv):
             if self.start_player_state and self.observations_made==0:
                 self.player_states[agent] = self.start_player_state
             else:
-                self.player_states[agent] = get_player_state(self.agent_id_to_player_id[agent])
+                if self.deffered_actions[agent] is None:
+                    self.player_states[agent] = get_player_state(self.agent_id_to_player_id[agent])
+                    
+                    #print(f"Updated state for agent {agent}")
+                    #z=[c['name'] for c in self.player_states[agent]['cardsInHand']]
+                    #print(f"cards in hand: {z}")
                 #print(f"self.observations_made={self.observations_made}")
                 if self.waiting_for and self.observations_made==0:
                     self.player_states[agent]["waitingFor"] =self.waiting_for
-
-            action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"),self.player_states[agent])  # Initialize the action map
+            action_map={}
+            if self.deffered_actions[agent] is None:
+                action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"),self.player_states[agent],True,None)  # Initialize the action map
+            else:
+                action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"),self.player_states[agent],True,self.deffered_actions[agent])  # Initialize the action map
+            
             self.current_obs[agent] = observe(self.player_states[agent],action_map)
+            global mmax_actions
+            if len(action_map.keys())>mmax_actions:
+                with open(os.path.join("data","max_actions",f"{mmax_actions}.json"),'w',encoding='utf-8') as f:
+                        f.write(json.dumps({
+                            "action_map": action_map,
+                            "player_state":self.player_states[agent]
+                        }))
+                mmax_actions=len(action_map.keys())
             #print(f"Action map: \n{json.dumps(action_map,indent=2)}")
             self.legal_actions[agent] = list(action_map.keys())[:MAX_ACTIONS]
             self.action_lookup[agent] = {i: action_map[i] for i in self.legal_actions[agent]}
@@ -193,12 +216,12 @@ class TerraformingMarsEnv(ParallelEnv):
         except:
             self._agent_selector = AgentSelector(self.agents)
         self.agent_selection = self._agent_selector.reset()
-        new_game_response=None
+        
         self.terminations={agent: False for agent in self.agents}
         self.truncations={agent: False for agent in self.agents}
+        new_game_response=self.start_player_state
         if self.init_from_player_state:
             self.spectator_id=self.start_player_state['game']['spectatorId']
-            new_game_response=self.start_player_state
         else:
             new_game_response=start_new_game(len(self.agents))
             self.game_id=new_game_response['id']
@@ -206,6 +229,7 @@ class TerraformingMarsEnv(ParallelEnv):
             self.spectator_id=new_game_response['spectatorId']
         self.player_name_to_id={}
         self.agent_id_to_player_id={}
+        self.deffered_actions={agent: None for agent in self.agents}
 
         for i in range(len(self.agents)):
             agent=self.agents[i]
@@ -225,7 +249,7 @@ class TerraformingMarsEnv(ParallelEnv):
         return self.current_obs,self.infos
     
     def get_action_mask(self):
-        return [len(self.legal_actions[agent]) for agent in self.agents]
+        return [len(self.legal_actions[agent])+1 for agent in self.agents]
 
 
     def post_player_input(self,agent_id,player_input):
@@ -233,9 +257,12 @@ class TerraformingMarsEnv(ParallelEnv):
 
     #action= {'1': 2774, '2': 6487}
     def step(self, actions):
+        old_player_input=None
+        
         acts=[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]
         for agent in actions:
-            action=actions[agent]
+            need_sleep=False
+            action=int(actions[agent])
             if action==0:
                 self.dones[agent] = True
                 self.rewards[agent] = -5 if len(self.action_lookup[agent].keys())<=0 else -7
@@ -244,19 +271,77 @@ class TerraformingMarsEnv(ParallelEnv):
             
             action=action-1
             
+            
+
             player_input = self.action_lookup[agent].get(action)
             #print(f"Action: {action}/{len(self.action_lookup[agent].keys())} player_input={player_input}")
             if player_input:
+                if self.deffered_actions[agent] is None:
+                    first_deffered_action=find_first_with_nested_attr(player_input,"__deferred_action")
+                    if first_deffered_action is not None:
+                        #print(f"new deffered action: {player_input}")
+                        self.deffered_actions[agent]=player_input
+                        self.rewards[agent]=0
+                        continue
+                    else:
+                        self.deffered_actions[agent]=None
+                else:
+                    first_deffered_action=find_first_with_nested_attr(self.deffered_actions[agent],"__deferred_action")
+                    if first_deffered_action is None:
+                        raise Exception("first_deffered_action should not be None")
+                    if player_input['type']!="deffered":
+                        raise Exception("player_input should be deffered")
+                    parent,deffered=first_deffered_action
+                    if player_input["xtype"]=="xcard_choose":
+                        selected=deffered.get('selected',[])
+                        selected.append(player_input['xoption']['name'])
+                        if len(selected)>=deffered['xmax']:
+                            parent['cards']=selected
+                            need_sleep=True
+                        else:
+                            deffered['selected']=selected
+                    elif player_input["xtype"]=="xpayment":
+                        parent['payment']=player_input['xoption']
+                        need_sleep=True
+                    elif player_input["xtype"]=="xconfirm_card_choose":
+                        selected=deffered.get('selected',[])
+                        if len(selected)<deffered['xmin']:
+                            raise Exception("len(selected)<deffered['xmin']")
+                        parent['cards']=selected
+                        need_sleep=True
+                    first_deffered_action=find_first_with_nested_attr(self.deffered_actions[agent],"__deferred_action")
+                    if first_deffered_action is not None:
+                        continue
+                    else:
+                        old_player_input=player_input
+                        player_input=self.deffered_actions[agent]
+                        #print(f"Agent {agent}")
+                        #print(f"parent: {parent}")
+                        #print(f"deffered: {deffered}")
+                        #print(f"old_player_input: {old_player_input}")
+                        #print(f"player_input: {player_input}")
+                        
+                        self.deffered_actions[agent]=None
+
+
                 #print(f"Agent {agent} selected input: {player_input}")
                 res=self.post_player_input(agent, player_input)
-                if res is None:
+                if need_sleep:
+                    sleep(0.3)
+                if isinstance(res,str) and  old_player_input is not None:
+                    #print(f"res.text={res}")
+                    pass
+                if isinstance(res,str):
                     print(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
-                    with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'wb',encoding='utf-8') as f:
+                    if 'already exists' in res:
+                        sleep(0.5)
+                        continue
+                    with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'w',encoding='utf-8') as f:
                         f.write(json.dumps({
                             "player_link": f"{SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}",
                             "player_id": self.agent_id_to_player_id[agent],
-                            "error": res.text,
                             "player_input":player_input,
+                            "error":res,
                             "player_state":self.player_states[agent]
                         }))
                     #raise Exception("Bad player actions")
@@ -308,7 +393,7 @@ class TerraformingMarsEnv(ParallelEnv):
         
         if max_actions==0 and not is_terminate:
             for agent in self.agents:
-                with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'wb',encoding='utf-8') as f:
+                with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'w',encoding='utf-8') as f:
                     f.write(json.dumps({
                         "player_link": f"{SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}",
                         "player_id": self.agent_id_to_player_id[agent],
@@ -348,20 +433,3 @@ class TerraformingMarsEnv(ParallelEnv):
 def parallel_env():
     return TerraformingMarsEnv(['1','2'])
 
-if __name__ == '__main__':
-    env=TerraformingMarsEnv(["1","2"])
-    print(f"Agents and players: {env.agent_id_to_player_id}")
-    print(f"Spectator id: {SERVER_BASE_URL}/spectator?id={env.spectator_id}")
-    print(f"Game id: {env.game_id}")
-    #print(f"Actions: {json.dumps(env.action_lookup,indent=4)}")
-    print(f"Observes: {env.current_obs}")
-    print(f"Observes len: {len(env.current_obs['1'])}")
-    sleep(10)
-    env.step(1)
-    sleep(10)
-    env.step(2)
-    sleep(10)
-    #http://localhost:9976/spectator?id=se97c54ea92af
-    if not USE_MOCK_SERVER and LOG_REQUESTS:
-        with open('response.json', 'w') as f:
-            f.write(json.dumps(request_responses,indent=2))

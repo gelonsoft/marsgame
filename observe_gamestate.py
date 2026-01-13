@@ -29,7 +29,7 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
     if not action:
         return action_vec
     
-    action_type = action.get("type", "")
+    action_type = action.get("xtype", action.get("type",""))
     
     # 1. Categorical encoding for action type (first dimension)
     action_types = [
@@ -37,7 +37,7 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
         "colony", "delegate", "option", "party", "payment",
         "player", "productionToLose", "projectCard", "space",
         "aresGlobalParameters", "globalEvent", "policy",
-        "resource", "resources"
+        "resource", "resources","xcard_choose","xconfirm_card_choose","xpayment"
     ]
     if action_type in action_types:
         action_vec[0] = action_types.index(action_type) / len(action_types)  # Normalized categorical
@@ -76,7 +76,13 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
             action_vec[257+i] = card.get("calculatedCost", 0) / 50.0
             action_vec[321+i] = float("science" in card.get("tags", {}))
             action_vec[385+i] = float("building" in card.get("tags", {}))
-    
+    elif action_type == "xcard_choose":
+        card = action.get("xoption", {})
+        action_vec[1] = (ALL_CARD_NAMES.index(card["name"]) + 1) / len(ALL_CARD_NAMES)  # Normalized index
+
+    elif action_type == "xconfirm_card_choose":
+        action_vec[1]=1.0
+
     elif action_type == "colony":
         action_vec[1] = float("colonyName" in action)
     
@@ -93,7 +99,33 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
         action_vec[3] = payment.get("titanium", 0) / 20.0
         action_vec[4] = payment.get("heat", 0) / 20.0
         action_vec[5] = payment.get("plants", 0) / 20.0
+        action_vec[6] = payment.get("microbes", 0) / 20.0
+        action_vec[7] = payment.get("floaters", 0) / 20.0
+        action_vec[8] = payment.get("lunaArchivesScience", 0) / 20.0
+        action_vec[9] = payment.get("spireScience", 0) / 20.0
+        action_vec[10] = payment.get("seeds", 0) / 20.0
+        action_vec[11] = payment.get("auroraiData", 0) / 20.0
+        action_vec[12] = payment.get("graphene", 0) / 20.0
+        action_vec[13] = payment.get("kuiperAsteroids", 0) / 20.0
+        action_vec[14] = payment.get("corruption", 0) / 20.0
     
+    elif action_type == "xpayment":
+        payment = action.get("xoption", {})
+        action_vec[1] = payment.get("megaCredits", 0) / 100.0
+        action_vec[2] = payment.get("steel", 0) / 20.0
+        action_vec[3] = payment.get("titanium", 0) / 20.0
+        action_vec[4] = payment.get("heat", 0) / 20.0
+        action_vec[5] = payment.get("plants", 0) / 20.0
+        action_vec[6] = payment.get("microbes", 0) / 20.0
+        action_vec[7] = payment.get("floaters", 0) / 20.0
+        action_vec[8] = payment.get("lunaArchivesScience", 0) / 20.0
+        action_vec[9] = payment.get("spireScience", 0) / 20.0
+        action_vec[10] = payment.get("seeds", 0) / 20.0
+        action_vec[11] = payment.get("auroraiData", 0) / 20.0
+        action_vec[12] = payment.get("graphene", 0) / 20.0
+        action_vec[13] = payment.get("kuiperAsteroids", 0) / 20.0
+        action_vec[14] = payment.get("corruption", 0) / 20.0
+
     elif action_type == "player":
         action_vec[1] = float(action.get("player") != "NEUTRAL")
     

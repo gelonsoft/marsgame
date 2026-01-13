@@ -1,7 +1,7 @@
 import json
 import os
 import random
-MAX_ACTIONS=int(os.getenv('MAX_ACTIONS', "1024"))
+MAX_ACTIONS=int(os.getenv('MAX_ACTIONS', "64"))
 ONE_ACTION_ARRAY_SIZE=int(os.getenv('ONE_ACTION_ARRAY_SIZE', "1024"))
 MAX_GAME_FEATURES_SIZE=int(os.getenv('MAX_GAME_FEATURES_SIZE', "1024000"))
 TOTAL_ACTIONS=MAX_ACTIONS+1

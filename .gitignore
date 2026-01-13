@@ -4,3 +4,5 @@ tm_cards.html
 debug/
 runs/
 encoder_train.csv
+data/
+.vscode/
