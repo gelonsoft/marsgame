@@ -51,7 +51,7 @@ writer.add_text(
 
 start_time = time.time()
 
-def mask_logits(logits, action_mask):
+def mask_logits_old(logits, action_mask):
     """
     Modify logits by masking rightmost elements based on action_mask.
     
@@ -93,18 +93,37 @@ def mask_logits(logits, action_mask):
     
     return modified_logits
 
+def mask_logits(logits, valid_action_counts):
+    """
+    Masks invalid actions by setting logits to -inf.
+    valid_action_counts: list[int] — number of valid actions per batch row
+    """
+    device = logits.device
+    batch_size, num_actions = logits.shape
+
+    masked = torch.full_like(logits, float('-inf')).to(device)
+
+    for i, valid_n in enumerate(valid_action_counts):
+        if valid_n > 0:
+            masked[i, :valid_n] = logits[i, :valid_n]
+
+    return masked
+
 class Agent(nn.Module):
-    def __init__(self, obs_size,num_actions):
+    def __init__(self, obs_size, num_actions):
         super().__init__()
 
         self.network = nn.Sequential(
-            self._layer_init(nn.Linear(obs_size,num_actions )),
+            self._layer_init(nn.Linear(obs_size, 4096)),
             nn.ReLU(),
-            self._layer_init(nn.Linear(num_actions, num_actions*2)),
+            self._layer_init(nn.Linear(4096, 512)),
+            nn.ReLU(),
+            self._layer_init(nn.Linear(512, 256)),
             nn.ReLU(),
         )
-        self.actor = self._layer_init(nn.Linear(num_actions*2, num_actions), std=0.01)
-        self.critic = self._layer_init(nn.Linear(num_actions*2, 1))
+
+        self.actor = self._layer_init(nn.Linear(256, num_actions), std=0.01)
+        self.critic = self._layer_init(nn.Linear(256, 1), std=1.0)
 
     def _layer_init(self, layer, std=np.sqrt(2), bias_const=0.0):
         torch.nn.init.orthogonal_(layer.weight, std)
@@ -116,10 +135,12 @@ class Agent(nn.Module):
 
     def get_action_and_value(self, x, action=None, action_mask=None):
         hidden = self.network(x)
-        logits = mask_logits(self.actor(hidden),action_mask=action_mask)
+        logits = mask_logits(self.actor(hidden), action_mask)
         probs = Categorical(logits=logits)
+
         if action is None:
             action = probs.sample()
+
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
 
@@ -158,10 +179,12 @@ def unbatchify(x, env):
 if __name__ == "__main__":
     """ALGO PARAMS"""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ent_coef = 0.1
-    vf_coef = 0.1
-    clip_coef = 0.1
+    ent_coef = 0.01
+    vf_coef = 0.5
+    clip_coef = 0.2
     gamma = 0.99
+    start_lr = 3e-4
+    gae_lambda = 0.95
 
 
     
@@ -172,13 +195,16 @@ if __name__ == "__main__":
     #env = resize_v1(env, frame_size[0], frame_size[1])
     #env = frame_stack_v1(env, stack_size=stack_size)
     num_agents = len(env.possible_agents)
+    #num_actions = env.action_space(env.possible_agents[0]).shape[0]
     num_actions = env.action_space(env.possible_agents[0]).shape[0]
     observation_size = env.observation_space(env.possible_agents[0]).shape
 
     """ LEARNER SETUP """
     print(f"Num actions is {num_actions} space={num_actions}")
     agent = Agent(obs_size=observation_size[0],num_actions=num_actions)
+    print("NN created")
     optimizer = optim.Adam(agent.parameters(), lr=start_lr, eps=1e-5)
+    print("Optimizer created")
     if continue_train:
         checkpoint=torch.load(model_path)
         agent.load_state_dict(checkpoint['model_state_dict'])
@@ -186,9 +212,9 @@ if __name__ == "__main__":
         print(f"Loaded model from {model_path}")
 
     agent.to(device)
+    print("NN sent to device")
     
-    
-    scheduler = StepLR(optimizer, step_size=30,gamma=0.1)
+    #scheduler = StepLR(optimizer, step_size=30,gamma=0.1)
     """ ALGO LOGIC: EPISODE STORAGE"""
     end_step = 0
     total_episodic_return = 0
@@ -199,7 +225,7 @@ if __name__ == "__main__":
     rb_terms = torch.zeros((max_cycles, num_agents)).to(device)
     rb_values = torch.zeros((max_cycles, num_agents)).to(device)
     rb_action_masks=torch.zeros((max_cycles, num_agents)).to(device)
-
+    print("Training started")
     """ TRAINING LOGIC """
     # train for n number of episodes
     for episode in range(total_episodes):
@@ -218,7 +244,7 @@ if __name__ == "__main__":
 
                 # get action from the agent
                 action_mask=env.get_action_mask()
-                actions, logprobs, _, values = agent.get_action_and_value(obs,action_mask=action_mask)
+                actions, logprobs, _, values = agent.get_action_and_value(obs, action_mask=action_mask)
                 for ii in range(len(env.agents)):
                     rb_action_masks[step][ii]=action_mask[ii]
                 #print(f"action_mask={action_mask} rb_action_masks.shape={rb_action_masks.shape} rb_action_masks={rb_action_masks.cpu()}")
@@ -229,7 +255,7 @@ if __name__ == "__main__":
                     unbatchify(actions, env)
                 )
                 for agent_id in env.agents:
-                    writer.add_scalar(f"charts/train-player{agent_id}", episode, rewards[agent_id])
+                    writer.add_scalar(f"charts/train-player{agent_id}", rewards[agent_id], episode)
                 
                 #print(f"Next obs: {next_obs}")
 
@@ -259,10 +285,11 @@ if __name__ == "__main__":
             for t in reversed(range(end_step)):
                 delta = (
                     rb_rewards[t]
-                    + gamma * rb_values[t + 1] * rb_terms[t + 1]
+                    + gamma * rb_values[t + 1] * (1 - rb_terms[t + 1])
                     - rb_values[t]
                 )
-                rb_advantages[t] = delta + gamma * gamma * rb_advantages[t + 1]
+
+                rb_advantages[t] = delta + gamma * gae_lambda * rb_advantages[t + 1] * (1 - rb_terms[t + 1])
             rb_returns = rb_advantages + rb_values
 
         # convert our episodes to batch of individual transitions
@@ -287,7 +314,9 @@ if __name__ == "__main__":
                 #print(f"Batch index: {batch_index} action_mask={b_action_masks.long()[batch_index].cpu()}")
 
                 _, newlogprob, entropy, value = agent.get_action_and_value(
-                    b_obs[batch_index], b_actions.long()[batch_index],action_mask=b_action_masks.long()[batch_index]
+                    b_obs[batch_index],
+                    b_actions.long()[batch_index],
+                    action_mask=b_action_masks.long()[batch_index]
                 )
                 logratio = newlogprob - b_logprobs[batch_index]
                 ratio = logratio.exp()
@@ -365,7 +394,7 @@ if __name__ == "__main__":
                 model_files.sort(key=os.path.getmtime)
                 os.remove(model_files[0])           
                 print(f"Removed oldest model file {model_files[0]} to keep {save_last_n} models")
-        scheduler.step()
+        #scheduler.step()
                       
     """ RENDER THE POLICY """
     env = parallel_env()

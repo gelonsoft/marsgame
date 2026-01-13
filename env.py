@@ -140,6 +140,7 @@ class TerraformingMarsEnv(ParallelEnv):
         self.dones = {agent: False for agent in self.agents}
         self.rewards = {agent: 0.0 for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
+        self.prev_player_metrics = {agent: {} for agent in self.agents}
         self.player_states={}
         self.action_lookup = {}
         self.reverse_action_lookup = {}  # For debugging
@@ -209,6 +210,24 @@ class TerraformingMarsEnv(ParallelEnv):
     def observe(self, agent):
         return self.current_obs[agent]
 
+    def _extract_player_metrics(self, agent):
+        p = self.player_states[agent]["thisPlayer"]
+
+        tr = p["terraformRating"]
+
+        production = (
+            p["megaCreditProduction"]
+            + p["steelProduction"]
+            + p["titaniumProduction"]
+            + p["plantProduction"]
+            + p["energyProduction"]
+            + p["heatProduction"]
+        )
+
+        return {
+            "tr": tr,
+            "production": production
+        }
     def reset(self, seed=None, options=None):
         self.agents = self.possible_agents[:]
         try:
@@ -216,7 +235,7 @@ class TerraformingMarsEnv(ParallelEnv):
         except:
             self._agent_selector = AgentSelector(self.agents)
         self.agent_selection = self._agent_selector.reset()
-        
+        self.prev_player_metrics = {agent: {} for agent in self.agents}
         self.terminations={agent: False for agent in self.agents}
         self.truncations={agent: False for agent in self.agents}
         new_game_response=self.start_player_state
@@ -249,7 +268,7 @@ class TerraformingMarsEnv(ParallelEnv):
         return self.current_obs,self.infos
     
     def get_action_mask(self):
-        return [len(self.legal_actions[agent])+1 for agent in self.agents]
+        return [len(self.legal_actions[agent]) or 1 for agent in self.agents]
 
 
     def post_player_input(self,agent_id,player_input):
@@ -258,18 +277,22 @@ class TerraformingMarsEnv(ParallelEnv):
     #action= {'1': 2774, '2': 6487}
     def step(self, actions):
         old_player_input=None
+        self.prev_player_metrics = {
+            agent: self._extract_player_metrics(agent)
+            for agent in self.agents
+        }
         
         acts=[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]
         for agent in actions:
             need_sleep=False
             action=int(actions[agent])
-            if action==0:
-                self.dones[agent] = True
-                self.rewards[agent] = -5 if len(self.action_lookup[agent].keys())<=0 else -7
-                continue
+            #if action==0:
+            #    self.dones[agent] = True
+            #    self.rewards[agent] = -5 if len(self.action_lookup[agent].keys())<=0 else -7
+            #    continue
             
             
-            action=action-1
+            #action=action-1
             
             
 
@@ -332,6 +355,7 @@ class TerraformingMarsEnv(ParallelEnv):
                     #print(f"res.text={res}")
                     pass
                 if isinstance(res,str):
+                    self.rewards[agent] = -0.05
                     print(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
                     if 'already exists' in res:
                         sleep(0.5)
@@ -354,6 +378,23 @@ class TerraformingMarsEnv(ParallelEnv):
 
         self._update_all_observations()
         for agent in self.agents:
+            prev = self.prev_player_metrics.get(agent)
+            if prev is None:
+                continue
+
+            try:
+                curr = self._extract_player_metrics(agent)
+
+                delta_tr = curr["tr"] - prev["tr"]
+                delta_prod = curr["production"] - prev["production"]
+
+                # Shaping
+                self.rewards[agent] += 0.01                     # valid move bonus
+                self.rewards[agent] += 0.1 * delta_tr           # TR shaping
+                self.rewards[agent] += 0.02 * delta_prod        # production shaping
+
+            except Exception:
+                pass
             if self.rewards[agent]<0:
                 if self.rewards[agent]==-5:
                     self.rewards[agent]=0.0
@@ -362,8 +403,12 @@ class TerraformingMarsEnv(ParallelEnv):
                 continue
             
             try:
-                self.rewards[agent]=int(self.player_states[agent]['thisPlayer']['victoryPointsBreakdown']['total'])/1000
-                self.rewards[agent]=self.rewards[agent]
+                vp = int(self.player_states[agent]['thisPlayer']['victoryPointsBreakdown']['total'])-20
+                if vp<0:
+                    vp=0
+                self.rewards[agent] += vp / 1000.0   # scaled terminal reward
+                self.rewards[agent] += 0.01
+                #self.rewards[agent]=self.rewards[agent]
                 if self.rewards[agent]>1:
                     self.rewards[agent]=1.0
                 if self.rewards[agent]<-1:
