@@ -10,12 +10,16 @@ import torch.optim as optim
 from torch.distributions.categorical import Categorical
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.tensorboard import SummaryWriter
+from vec_env import VectorizedTMEnv
+from selfplay import SelfPlayPool
 
 #from pettingzoo.butterfly import pistonball_v6
 
 from env import parallel_env
 
 os.environ['CUDA_PATH']='e:/PC/cuda126'
+NUM_ENVS = 8
+
 continue_train=os.getenv('CONTINUE_TRAIN', 'False') == 'True'
 model_path=os.getenv('MODEL_PATH', 'ppo_model.pt') 
 run_name=os.getenv('RUN_NAME', '')
@@ -27,6 +31,7 @@ total_episodes = int(os.getenv('TOTAL_EPISODES', "1000"))
 start_lr=float(os.getenv('START_LR', 0.001))
 save_last_n=int(os.getenv('SAVE_LAST_N', 5))
 save_interval=int(os.getenv('SAVE_INTERVAL', 5))
+
 
 print("=== Parameters ====")
 print(f"CONTINUE_TRAIN: {continue_train}")
@@ -190,12 +195,16 @@ if __name__ == "__main__":
     
 
     """ ENV SETUP """
-    env = parallel_env()
+    #env = parallel_env()
     #env = color_reduction_v0(env)
     #env = resize_v1(env, frame_size[0], frame_size[1])
     #env = frame_stack_v1(env, stack_size=stack_size)
-    num_agents = len(env.possible_agents)
+    #num_agents = len(env.possible_agents)
     #num_actions = env.action_space(env.possible_agents[0]).shape[0]
+    
+    env = VectorizedTMEnv(parallel_env, NUM_ENVS)
+
+    selfplay_pool = SelfPlayPool(max_size=5)
     num_actions = env.action_space(env.possible_agents[0]).shape[0]
     observation_size = env.observation_space(env.possible_agents[0]).shape
 
@@ -230,9 +239,12 @@ if __name__ == "__main__":
     # train for n number of episodes
     for episode in range(total_episodes):
         # collect an episode
+        if episode % 50 == 0 and episode > 0:
+            print("Saving self-play snapshot")
+            selfplay_pool.add(agent)
         with torch.no_grad():
             # collect observations and convert to batch of torch tensors
-            next_obs, info = env.reset(seed=None)
+            next_obses, infos = env.reset()
             
             # reset the episodic return
             total_episodic_return = 0
@@ -243,17 +255,25 @@ if __name__ == "__main__":
                 obs = batchify_obs(next_obs, device)
 
                 # get action from the agent
-                action_mask=env.get_action_mask()
-                actions, logprobs, _, values = agent.get_action_and_value(obs, action_mask=action_mask)
+                #action_mask=env.get_action_mask()
+                #actions, logprobs, _, values = agent.get_action_and_value(obs, action_mask=action_mask)
+                action_masks = env.get_action_masks()
+                actions_batch = []
+                for e in range(NUM_ENVS):
+                    obs = batchify_obs(next_obses[e], device)
+                    mask = action_masks[e]
+                    actions, _, _, _ = agent.get_action_and_value(obs, action_mask=mask)
+                    actions_batch.append(unbatchify(actions, env.envs[e]))
                 for ii in range(len(env.agents)):
                     rb_action_masks[step][ii]=action_mask[ii]
                 #print(f"action_mask={action_mask} rb_action_masks.shape={rb_action_masks.shape} rb_action_masks={rb_action_masks.cpu()}")
                 # execute the environment and log data
                 
+                next_obses, rewards, terms, truncs, infos = env.step(actions_batch)
 
-                next_obs, rewards, terms, truncs, infos = env.step(
-                    unbatchify(actions, env)
-                )
+                #next_obs, rewards, terms, truncs, infos = env.step(
+                #    unbatchify(actions, env)
+                #)
                 for agent_id in env.agents:
                     writer.add_scalar(f"charts/train-player{agent_id}", rewards[agent_id], episode)
                 
@@ -396,34 +416,43 @@ if __name__ == "__main__":
                 print(f"Removed oldest model file {model_files[0]} to keep {save_last_n} models")
         #scheduler.step()
                       
-    """ RENDER THE POLICY """
-    env = parallel_env()
-    #env = color_reduction_v0(env)
-    #env = resize_v1(env, 64, 64)
-    #env = frame_stack_v1(env, stack_size=4)
+    # """ RENDER THE POLICY """
+    # env = parallel_env()
+    # #env = color_reduction_v0(env)
+    # #env = resize_v1(env, 64, 64)
+    # #env = frame_stack_v1(env, stack_size=4)
 
-    agent.eval()
+    # agent.eval()
 
-    with torch.no_grad():
-        # render 5 episodes out
-        for episode in range(5):
-            obs, infos = env.reset(seed=None)
-            obs = batchify_obs(obs, device)
-            terms = [False]
-            truncs = [False]
-            for cycle in range(max_cycles):
-                action_mask=env.get_action_mask()
-                actions, logprobs, _, values = agent.get_action_and_value(obs,action_mask=action_mask)
-                #print(f"Agent eval step: actions={actions}")
-                obs, rewards, terms, truncs, infos = env.step(unbatchify(actions, env))
-                for agent_id in env.agents:
-                    writer.add_scalar(f"charts/eval-player{agent_id}", episode, rewards[agent_id])
-                obs = batchify_obs(obs, device)
-                terms = [terms[a] for a in terms]
-                truncs = [truncs[a] for a in truncs]
-                if any(terms) and any(truncs):
-                    print("Termination or truncation detected. Ending episode.")
-                    break
+    # with torch.no_grad():
+    #     # render 5 episodes out
+    #     for episode in range(5):
+    #         obs, infos = env.reset(seed=None)
+    #         obs = batchify_obs(obs, device)
+    #         terms = [False]
+    #         truncs = [False]
+    #         for cycle in range(max_cycles):
+    #             #action_mask=env.get_action_mask()
+    #             #actions, logprobs, _, values = agent.get_action_and_value(obs,action_mask=action_mask)
+    #             #obs, rewards, terms, truncs, infos = env.step(unbatchify(actions, env))
+    #             action_masks = env.get_action_masks()
+
+    #             actions_batch = []
+    #             for e in range(NUM_ENVS):
+    #                 obs = batchify_obs(next_obses[e], device)
+    #                 mask = action_masks[e]
+    #                 actions, _, _, _ = agent.get_action_and_value(obs, action_mask=mask)
+    #                 actions_batch.append(unbatchify(actions, env.envs[e]))
+
+    #             next_obses, rewards, terms, truncs, infos = env.step(actions_batch)
+    #             for agent_id in env.agents:
+    #                 writer.add_scalar(f"charts/eval-player{agent_id}", episode, rewards[agent_id])
+    #             obs = batchify_obs(obs, device)
+    #             terms = [terms[a] for a in terms]
+    #             truncs = [truncs[a] for a in truncs]
+    #             if any(terms) and any(truncs):
+    #                 print("Termination or truncation detected. Ending episode.")
+    #                 break
     
     
     

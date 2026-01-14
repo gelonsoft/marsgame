@@ -24,7 +24,7 @@ def one_hot_encode(value, categories):
     
 def encode_action(action: Dict[str, Any]) -> np.ndarray:
     """Encodes any action into a fixed 1024-dimension feature vector with categorical card encoding"""
-    action_vec = np.zeros(1024, dtype=np.float32)
+    action_vec = np.zeros(ONE_ACTION_ARRAY_SIZE, dtype=np.float32)
     
     if not action:
         return action_vec
@@ -67,15 +67,18 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
     elif action_type == "card":
         # 2. Categorical encoding for cards (positions 1-256)
         cards = action.get("cards", [])
-        for i, card in enumerate(cards[:256]):  # Max 256 cards
-            if card["name"] in ALL_CARD_NAMES:
-                action_vec[1+i] = (ALL_CARD_NAMES.index(card["name"]) + 1) / len(ALL_CARD_NAMES)  # Normalized index
-        
-        # Additional card features (positions 257-320)
-        for i, card in enumerate(cards[:64]):
-            action_vec[257+i] = card.get("calculatedCost", 0) / 50.0
-            action_vec[321+i] = float("science" in card.get("tags", {}))
-            action_vec[385+i] = float("building" in card.get("tags", {}))
+        if isinstance(cards,dict):
+            action_vec[1:1+64]=encode_action(cards)[:64]
+        else:
+            for i, card in enumerate(cards[:256]):  # Max 256 cards
+                if card["name"] in ALL_CARD_NAMES:
+                    action_vec[1+i] = (ALL_CARD_NAMES.index(card["name"]) + 1) / len(ALL_CARD_NAMES)  # Normalized index
+            
+            # Additional card features (positions 257-320)
+            for i, card in enumerate(cards[:64]):
+                action_vec[257+i] = card.get("calculatedCost", 0) / 50.0
+                action_vec[321+i] = float("science" in card.get("tags", {}))
+                action_vec[385+i] = float("building" in card.get("tags", {}))
     elif action_type == "xcard_choose":
         card = action.get("xoption", {})
         action_vec[1] = (ALL_CARD_NAMES.index(card["name"]) + 1) / len(ALL_CARD_NAMES)  # Normalized index
@@ -184,7 +187,7 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
     
     return action_vec
     
-def observe(player_view_model: Dict[str, Any],available_actions: Dict[str,Any]) -> np.ndarray:
+def observe(player_view_model: Dict[str, Any],action_slot_map: Dict[str,Any]) -> np.ndarray:
     """
     Comprehensive observation function that includes:
     - All game state features
@@ -392,18 +395,20 @@ def observe(player_view_model: Dict[str, Any],available_actions: Dict[str,Any]) 
     
     # 2. Available Action Features
 
-    action_features = np.zeros(MAX_ACTIONS*ONE_ACTION_ARRAY_SIZE, dtype=np.float32)
+    action_features = np.zeros((MAX_ACTIONS, ONE_ACTION_ARRAY_SIZE), dtype=np.float32)
     # Encode the current available action
-    if available_actions:
+    if action_slot_map:
             # Encode primary action
-            action_features[:ONE_ACTION_ARRAY_SIZE] = encode_action(available_actions)
-            
+            #action_features[:ONE_ACTION_ARRAY_SIZE] = encode_action(available_actions)
+            for slot, action in action_slot_map.items():
+                feats = encode_action(action)   # must return size ONE_ACTION_ARRAY_SIZE
+                action_features[slot] = feats
             # Encode nested actions for AND/OR types
-            if available_actions.get("type") in ["and", "or"]:
-                nested_actions = available_actions.get("responses", [])[:MAX_ACTIONS-1]
-                for i, nested_action in enumerate(nested_actions):
-                    start_idx = (i+1) * ONE_ACTION_ARRAY_SIZE
-                    action_features[start_idx:start_idx+ONE_ACTION_ARRAY_SIZE] = encode_action(nested_action)
+            # if available_actions.get("type") in ["and", "or"]:
+            #     nested_actions = available_actions.get("responses", [])[:MAX_ACTIONS-1]
+            #     for i, nested_action in enumerate(nested_actions):
+            #         start_idx = (i+1) * ONE_ACTION_ARRAY_SIZE
+            #         action_features[start_idx:start_idx+ONE_ACTION_ARRAY_SIZE] = encode_action(nested_action)
     
     # Combine all features
     #features.extend(action_features)
@@ -413,7 +418,7 @@ def observe(player_view_model: Dict[str, Any],available_actions: Dict[str,Any]) 
     observation=observation[:MAX_GAME_FEATURES_SIZE]
     observation = np.concatenate([
         observation,
-        action_features
+        action_features.flatten()
     ])
     # Final processing
     observation = np.nan_to_num(observation)  # Handle any NaN values

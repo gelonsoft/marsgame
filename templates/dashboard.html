@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Terraforming Mars AI Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+</head>
+<body>
+<h1>Terraforming Mars AI Dashboard</h1>
+
+<select id="runSelect"></select>
+
+<h2>Leaderboard</h2>
+<div id="leaderboard"></div>
+
+<h2>Live Metrics</h2>
+<div id="charts"></div>
+
+<h2>TensorBoard</h2>
+<iframe src="http://localhost:6006" width="100%" height="800"></iframe>
+
+<script>
+const socket = io();
+
+fetch("/api/experiments").then(r => r.json()).then(runs => {
+    let sel = document.getElementById("runSelect");
+    runs.forEach(r => {
+        let opt = document.createElement("option");
+        opt.value = r;
+        opt.text = r;
+        sel.appendChild(opt);
+    });
+});
+
+socket.on("leaderboard", msg => {
+    let html = "<table border=1><tr><th>Agent</th><th>Elo</th></tr>";
+    Object.entries(msg.data).forEach(([k,v]) => {
+        html += `<tr><td>${k}</td><td>${v.toFixed(1)}</td></tr>`;
+    });
+    html += "</table>";
+    document.getElementById("leaderboard").innerHTML = html;
+});
+</script>
+</body>
+</html>

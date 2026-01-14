@@ -117,12 +117,21 @@ class PaymentOptionsCalculator:
                     current_payment_options.append({"resource":resource,"max":max_amount,"value":1})
         return current_payment_options
     def _get_spireScience(self,resource,selected_card: str,card_cost: int, card_metadata: Dict,player_input: Dict, player_state: Dict,current_payment_options:List[Dict]) -> List[Dict]:
-        if "Spire" in [n.get('name') for n in player_state.get('thisPlayer',{}).get('tableau',[])] and card_metadata.get('type','')=="standard_project":
-            player_have=player_input.get(resource, 0)
-            if player_have>0:
-                value=2
-                max_amount=min(card_cost//value+card_cost%value,player_have)
-                current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
+        if "Spire" in [n.get('name') for n in player_state.get('thisPlayer',{}).get('tableau',[])]:
+            if card_metadata.get('type','')=="standard_project":
+                player_have=player_input.get(resource, 0)
+                if player_have>0:
+                    value=2
+                    max_amount=min(card_cost//value+card_cost%value,player_have)
+                    current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
+            elif player_input.get('type',"")=="payment" and player_input.get('paymentOptions',{}).get(resource):
+                    for t in player_state.get('thisPlayer',{}).get('tableau',[]):
+                        if t.get('name')=="Spire":
+                            player_have=t.get('resources',0)
+                            if player_have>0:
+                                value=2
+                                max_amount=min(card_cost//value+card_cost%value,player_have)
+                                current_payment_options.append({"resource":resource,"max":max_amount,"value":value})
         return current_payment_options
     def _get_seeds(self,resource,selected_card: str,card_cost: int, card_metadata: Dict,player_input: Dict, player_state: Dict,current_payment_options:List[Dict]) -> List[Dict]:
         if "Soylent Seedling Systems" in [n.get('name') for n in player_state.get('thisPlayer',{}).get('tableau',[])] and (selected_card=="Greenery" or "plant" in card_metadata.get("tags",[])):
@@ -184,16 +193,20 @@ class PaymentOptionsCalculator:
     def create_payment_from_input(self, player_input: Dict, selected_card: str, cards: List[Dict], player_state: Dict) -> List[Dict]:
         """Generate all valid payment combinations for card playment based on available resources."""
         # Find the selected card to get its cost
-        card_cost = 0
+        card_cost = -1
         card_metadata={}
         if selected_card:
-            for card in cards:
-                if card.get("name") == selected_card:
-                    card_cost = card.get("calculatedCost", 0)
-                    break
+            if cards:
+                for card in cards:
+                    if card.get("name") == selected_card:
+                        card_cost = card.get("calculatedCost", 0)
+                        break
+            if card_cost<0:
+                card_cost=player_input.get('amount',0)
             card_metadata=ALL_CARDS[selected_card]
+            
         else:
-            card_cost=player_input.get('amount')
+            card_cost=player_input.get('amount',0)
             
         if card_cost <= 0:
             return [self.create_basic_payment(0)]

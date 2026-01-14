@@ -97,7 +97,7 @@ class TerraformingMarsDecisionMapper:
                         }
                         i=i+1
                     for c in deffered['xoptions']:
-                        if c not in selected_cards:
+                        if c['name'] not in selected_cards:
                             action_space[i]={
                                 "type":"deffered",
                                 "xid":deffered["xid"],
@@ -235,8 +235,11 @@ class TerraformingMarsDecisionMapper:
             
             min_cards = player_input.get("min", 0)
             max_cards = player_input.get("max", len(cards))
+            #print(f"max_cards={max_cards} min_cards={min_cards} cards={cards}")
+            if max_cards<1:
+                print(f"BAD MAX CARDS player_input={player_input}")
             #print(f"cards in card: {[card['name'] for card in cards]}")
-            if len(cards)>0:
+            if len(cards)>0 and max_cards>0:
                 action_space[0]={
                     "type": "card",
                     "cards":{"__deferred_action": {
@@ -355,7 +358,15 @@ class TerraformingMarsDecisionMapper:
             # For resource selection, we'll just return the default for now
             action_space[0] = self._map_select_resources(player_input)
         elif input_type=="payment":
-            payments=self.payment_options_calculator.create_payment_from_input(player_input,None,None,player_state=player_state)
+            selected_card=None
+            cards=[]
+            try:
+                if 'standard project' in player_input.get('title',{}).get('message','') and player_input.get('title',{}).get('data',[{}])[0].get('type',0)==3:
+                    selected_card=player_input.get('title',{}).get('data',[{}])[0].get('value','')
+            except:
+                pass
+
+            payments=self.payment_options_calculator.create_payment_from_input(player_input,selected_card,[],player_state=player_state)
             #for i,payment in enumerate(payments):
             action_space[0] = {
                 "type":"payment",

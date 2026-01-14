@@ -21,6 +21,7 @@ import random
 from decision_mapper import TerraformingMarsDecisionMapper
 import logging
 import os
+from decode_observation import decode_observation
 
 logging.basicConfig(level=logging.INFO)  # Set the logging level to DEBUG
 
@@ -67,7 +68,7 @@ def get_player_state(player_id):
 def post_player_input(run_id,player_id, player_input_model):
     url = f"{SERVER_BASE_URL}/player/input"
     #logging.debug(f"post_player_input Request:---\n{json.dumps(player_input_model)}\n---\n")
-    print(f"post_player_input Request:---\n{json.dumps(player_input_model)}\n---\n")
+    #print(f"post_player_input Request:---\n{json.dumps(player_input_model)}\n---\n")
     player_input_model['runId']=run_id
     global request_responses,request_number
     if USE_MOCK_SERVER:
@@ -110,10 +111,13 @@ def start_new_game(num_players):
 class TerraformingMarsEnv(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "terraforming_mars_aec_v0","is_parallelizable":True}
 
-    def __init__(self, agent_ids: List[str], init_from_player_state=False, player_id=None,player_state=None,waiting_for=None):
+    def __init__(self, agent_ids: List[str], init_from_player_state=False, player_id=None,player_state=None,waiting_for=None,safe_mode=True):
         super().__init__()
+        self.action_slot_map = {}
+        self.reverse_action_slot_map = {}
+        self.raise_exceptions=not safe_mode
         self.decision_mapper=TerraformingMarsDecisionMapper(None)
-        
+        self.opponent_policy=None
         self.game_id=None
         self.init_from_player_state=init_from_player_state
         self.start_player_state=None
@@ -150,6 +154,7 @@ class TerraformingMarsEnv(ParallelEnv):
         self.truncations = {agent: False for agent in self.agents}
         self.reset()
         self.deffered_actions={agent: None for agent in self.agents}
+        self.skip_full_observation={agent: False for agent in self.agents}
         #self.player_states = {agent: get_player_state(self.agent_id_to_player_id[agent]) for agent in self.agents}
         sample_obs = self.current_obs[self.agents[0]] #observe(self.player_states[self.agents[0]],self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor")))
         self.observation_shape = sample_obs.shape
@@ -167,44 +172,79 @@ class TerraformingMarsEnv(ParallelEnv):
 
         #self._update_all_observations()
 
-    def _update_all_observations(self):
+    def flatten_actions(self, action):
+        flat = []
+
+        if action["type"] == "or":
+            for sub in action["options"]:
+                flat.extend(self.flatten_actions(sub))
+
+        elif action["type"] == "and":
+            combo = []
+            for sub in action["actions"]:
+                combo.extend(self.flatten_actions(sub))
+            flat.append({"type": "and", "actions": combo})
+
+        else:
+            flat.append(action)
+
+        return flat
+
+    def _generate_agent_action_map(self,agent):
+        action_map={}
+        if self.deffered_actions[agent] is None:
+            action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"),self.player_states[agent],True,None)  # Initialize the action map
+        else:
+            action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"),self.player_states[agent],True,self.deffered_actions[agent])  # Initialize the action map
+
+        server_actions= action_map #list(action_map.keys())[:MAX_ACTIONS]
+        self.legal_actions[agent] = server_actions 
+        #self.action_lookup[agent] = {i: action_map[i] for i in self.legal_actions[agent]}
+        #self.reverse_action_lookup[agent] = action_map
+        #self.action_spaces[agent] = spaces.Discrete(len(self.action_lookup[agent]) or 1)
+        slots = list(range(MAX_ACTIONS))
+        random.shuffle(slots)
+
+        legal = self.legal_actions[agent]
+        slot_map = {}
+        reverse_map = {}
+
+        for i, action in enumerate(legal.values()):
+            if i>=MAX_ACTIONS:
+                continue
+            slot = slots[i]
+            slot_map[slot] = action
+            reverse_map[slot] = i
+
+        self.action_slot_map[agent] = slot_map
+        self.reverse_action_slot_map[agent] = reverse_map
+
+        self.action_lookup[agent] = slot_map
+        self.action_spaces[agent] = spaces.Discrete(MAX_ACTIONS)
+
+    def _update_agent_state(self,agent,force_update=False):
+        
+        if self.start_player_state and self.observations_made==0:
+                self.player_states[agent] = self.start_player_state
+        else:
+            if force_update or (self.deffered_actions[agent] is None and not self.skip_full_observation[agent]):
+                #print(f"Update agent state for agent={agent}")
+                self.player_states[agent] = get_player_state(self.agent_id_to_player_id[agent])
+            if self.waiting_for and self.observations_made==0:
+                self.player_states[agent]["waitingFor"] =self.waiting_for
+
+    def _update_agent_observation(self,agent,force_update=False):
+        self._update_agent_state(agent,force_update)
+        self._generate_agent_action_map(agent)
+        self.current_obs[agent] = observe(self.player_states[agent],self.action_slot_map[agent])
+        
+
+    def _update_all_observations(self,force=False):
         self.current_obs = {}
         self.legal_actions = {}
         self.action_spaces = {}
         for agent in self.agents:
-            if self.start_player_state and self.observations_made==0:
-                self.player_states[agent] = self.start_player_state
-            else:
-                if self.deffered_actions[agent] is None:
-                    self.player_states[agent] = get_player_state(self.agent_id_to_player_id[agent])
-                    
-                    #print(f"Updated state for agent {agent}")
-                    #z=[c['name'] for c in self.player_states[agent]['cardsInHand']]
-                    #print(f"cards in hand: {z}")
-                #print(f"self.observations_made={self.observations_made}")
-                if self.waiting_for and self.observations_made==0:
-                    self.player_states[agent]["waitingFor"] =self.waiting_for
-            action_map={}
-            if self.deffered_actions[agent] is None:
-                action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"),self.player_states[agent],True,None)  # Initialize the action map
-            else:
-                action_map = self.decision_mapper.generate_action_space(self.player_states[agent].get("waitingFor"),self.player_states[agent],True,self.deffered_actions[agent])  # Initialize the action map
-            
-            self.current_obs[agent] = observe(self.player_states[agent],action_map)
-            global mmax_actions
-            if len(action_map.keys())>mmax_actions:
-                with open(os.path.join("data","max_actions",f"{mmax_actions}.json"),'w',encoding='utf-8') as f:
-                        f.write(json.dumps({
-                            "action_map": action_map,
-                            "player_state":self.player_states[agent]
-                        }))
-                mmax_actions=len(action_map.keys())
-            #print(f"Action map: \n{json.dumps(action_map,indent=2)}")
-            self.legal_actions[agent] = list(action_map.keys())[:MAX_ACTIONS]
-            self.action_lookup[agent] = {i: action_map[i] for i in self.legal_actions[agent]}
-            self.reverse_action_lookup[agent] = action_map
-
-            self.action_spaces[agent] = spaces.Discrete(len(self.action_lookup[agent]) or 1)
+            self._update_agent_observation(agent,force)
         self.observations_made+=1
 
     def observe(self, agent):
@@ -214,6 +254,8 @@ class TerraformingMarsEnv(ParallelEnv):
         p = self.player_states[agent]["thisPlayer"]
 
         tr = p["terraformRating"]
+
+        vp=int(self.player_states[agent]['thisPlayer']['victoryPointsBreakdown']['total'])
 
         production = (
             p["megaCreditProduction"]
@@ -226,9 +268,11 @@ class TerraformingMarsEnv(ParallelEnv):
 
         return {
             "tr": tr,
-            "production": production
+            "production": production,
+            "vp": vp
         }
     def reset(self, seed=None, options=None):
+        self.skip_full_observation={agent: False for agent in self.agents}
         self.agents = self.possible_agents[:]
         try:
             self._agent_selector = agent_selector(self.agents)
@@ -240,7 +284,7 @@ class TerraformingMarsEnv(ParallelEnv):
         self.truncations={agent: False for agent in self.agents}
         new_game_response=self.start_player_state
         if self.init_from_player_state:
-            self.spectator_id=self.start_player_state['game']['spectatorId']
+            self.spectator_id=self.start_player_state.get('game',{}).get('spectatorId','')
         else:
             new_game_response=start_new_game(len(self.agents))
             self.game_id=new_game_response['id']
@@ -267,23 +311,198 @@ class TerraformingMarsEnv(ParallelEnv):
         self._update_all_observations()
         return self.current_obs,self.infos
     
-    def get_action_mask(self):
-        return [len(self.legal_actions[agent]) or 1 for agent in self.agents]
+    #def get_action_mask(self):
+        #return [len(self.legal_actions[agent]) or 1 for agent in self.agents]
+    def get_action_mask(self, agent):
+        mask = [0] * MAX_ACTIONS
+
+        for slot in self.action_slot_map[agent].keys():
+            mask[slot] = 1
+
+        return mask
 
 
     def post_player_input(self,agent_id,player_input):
         return post_player_input(self.player_states[agent_id]['runId'],self.agent_id_to_player_id[agent_id],player_input)
 
+    def _calc_reward_by_metrics(self,agent,prev):
+        delta_tr=0
+        delta_prod=0
+        delta_vp=0
+        reward=0
+        if prev is not None:
+            try:
+                curr = self._extract_player_metrics(agent)
+                delta_tr = curr["tr"] - prev["tr"]
+                delta_prod = curr["production"] - prev["production"]
+                delta_vp = curr["vp"] - prev["vp"]
+            except Exception:
+                pass
+            reward += 0.01                     # valid move bonus
+            reward += 0.1 * delta_tr           # TR shaping
+            reward += 0.2 * delta_vp           # TR shaping
+            reward += 0.02 * delta_prod        # production shaping
+                
+        return reward
+
+
+    def _step(self,agent,action): 
+        #old_player_input=None
+        need_sleep=False
+        prev_player_metrics=self._extract_player_metrics(agent)
+        action_lookup=self.action_lookup[agent]
+        acts=len(action_lookup.keys())
+        if acts==0:
+            return 0
+        self.skip_full_observation[agent]=True
+        #player_input = action_lookup.get(action)
+        player_input = self.action_slot_map[agent].get(action)
+        reward=0
+        if player_input is not None:
+            if self.deffered_actions[agent] is None:
+                first_deffered_action=find_first_with_nested_attr(player_input,"__deferred_action")
+                if first_deffered_action is not None:
+                    self.deffered_actions[agent]=player_input
+                    player_input=None
+                else:
+                    self.deffered_actions[agent]=None
+            else:
+                first_deffered_action=find_first_with_nested_attr(self.deffered_actions[agent],"__deferred_action")
+                if first_deffered_action is None:
+                    raise Exception("first_deffered_action should not be None")
+                if player_input['type']!="deffered":
+                    raise Exception("player_input should be deffered")
+                parent,deffered=first_deffered_action
+                if player_input["xtype"]=="xcard_choose":
+                    selected=deffered.get('selected',[])
+                    selected.append(player_input['xoption']['name'])
+                    #print(f"a={agent} xcard_choose={player_input['xoption']['name']} selected_after={selected} deffered={deffered}" )
+                    if len(selected)>=deffered['xmax']:
+                        parent['cards']=selected
+                        need_sleep=True
+                    else:
+                        deffered['selected']=selected
+                elif player_input["xtype"]=="xpayment":
+                    parent['payment']=player_input['xoption']
+                    need_sleep=True
+                elif player_input["xtype"]=="xconfirm_card_choose":
+                    selected=deffered.get('selected',[])
+                    if len(selected)<deffered['xmin']:
+                        raise Exception("len(selected)<deffered['xmin']")
+                    parent['cards']=selected
+                    need_sleep=True
+                first_deffered_action=find_first_with_nested_attr(self.deffered_actions[agent],"__deferred_action")
+                if first_deffered_action is not None:
+                    player_input=None
+                else:
+                    player_input=self.deffered_actions[agent]
+                    self.deffered_actions[agent]=None
+
+            if player_input is not None:
+                #print(f"a={agent} player_input={player_input}")
+                z=[c['name'] for c in self.player_states[agent]['cardsInHand']]
+                #print(f"a={agent} cardsInHand={z}")
+                res=self.post_player_input(agent, player_input)
+                if need_sleep:
+                    #sleep(0.3)
+                    pass
+                if isinstance(res,str):
+                    reward = -0.05
+                    print(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
+                    if 'already exists' in res or 'Not waiting for anything' in res:
+
+                        #sleep(0.1)
+                        pass
+                    else:
+                        with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'w',encoding='utf-8') as f:
+                            f.write(json.dumps({
+                                "player_link": f"{SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}",
+                                "player_id": self.agent_id_to_player_id[agent],
+                                "player_input":player_input,
+                                "error":res,
+                                "player_state.waitingFor":self.player_states[agent]
+                            }))
+                        if self.raise_exceptions:
+                            raise Exception("Bad player actions")
+                        player_input=None
+                    self._update_agent_observation(agent,True)
+                else:
+                    #print(f"{agent}=agent")
+                    #print(f"action_lookup={action_lookup}")
+                    #print(f"player_input={player_input}")
+                    #print(f"res.waitingFor={res.get('waitingFor')}")
+                    #print(f"deffered_actions={self.deffered_actions[agent]}")
+                    #print(f"res={res}")
+                    #if need_sleep:
+                    self.skip_full_observation[agent]=True
+                    self.player_states[agent]=res
+        else:
+            raise Exception(f"Bad action id a={agent} action={action} of {self.action_lookup[agent]}")
+        
+        self.dones[agent] = True
+        self._update_agent_state(agent)
+        self._generate_agent_action_map(agent)
+        #print(f"action_lookup2={action_lookup}")
+        acts=len(self.action_lookup[agent].keys())
+        if acts==1:
+            #print(f"Substate for agent {agent}")
+            self._step(agent,list(self.action_lookup[agent].keys())[0])
+
+        reward+=self._calc_reward_by_metrics(agent,prev_player_metrics)
+        return reward
+
+
+
     #action= {'1': 2774, '2': 6487}
     def step(self, actions):
-        old_player_input=None
-        self.prev_player_metrics = {
-            agent: self._extract_player_metrics(agent)
-            for agent in self.agents
-        }
+        acts=[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]
+        for agent in actions:
+            self.rewards[agent]=self._step(agent,actions[agent])
+            self._update_agent_observation(agent)
+
+        max_actions=max([len(self.action_lookup[agent].keys()) for agent in self.agents])
+        is_terminate=False
+        if max_actions==0:
+            for ii in range(3):
+                print(f"Warning {ii}, no actions: waiting 1 second and checking again... max_actions={max_actions}, actions={[len(self.action_lookup[agent].keys()) for agent in self.agents]}")
+
+                if all([self.player_states[agent].get('game',{}).get('phase',"")=="end" for agent in self.agents]):
+                    print("End game detected. Terminating...")
+                    self.terminations = {agent: True for agent in self.agents}
+                    is_terminate=True
+                    break
+                else:
+                    if ii>0:
+                        time.sleep(1)
+                    self._update_all_observations(True)
+                    max_actions=max([len(self.action_lookup[agent].keys()) for agent in self.agents])
+                    if max_actions>0:
+                        break
+        
+        if max_actions==0 and not is_terminate:
+            for agent in self.agents:
+                with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'w',encoding='utf-8') as f:
+                    f.write(json.dumps({
+                        "player_link": f"{SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}",
+                        "player_id": self.agent_id_to_player_id[agent],
+                        "error": "No steps",
+                        "player_state":self.player_states[agent]
+                    }))
+            self.terminations = {agent: True for agent in self.agents}
+            print(f"No steps players={[self.agent_id_to_player_id[agent] for agent in self.agents]}")
+            if self.raise_exceptions:
+                raise Exception(f"No steps players={[self.agent_id_to_player_id[agent] for agent in self.agents]}")
+        
+
+        terms=[self.player_states[agent].get('game',{}).get('isTerraformed',False) for agent in self.agents]
+        phases=[self.player_states[agent].get('game',{}).get('phase',False) for agent in self.agents]
+        print(f"Step {SERVER_BASE_URL}/game?id={self.game_id} ... rewards={self.rewards} actions: {actions} of {acts} isTerraformed={terms} self.terminations={self.terminations} phases={phases}")
+        return self.current_obs,self.rewards,self.terminations,self.truncations, self.infos
+
         
         acts=[{agent:len(self.action_lookup[agent].keys())} for agent in self.action_lookup]
         for agent in actions:
+            self.prev_player_metrics[agent]=self._extract_player_metrics(agent)
             need_sleep=False
             action=int(actions[agent])
             #if action==0:
@@ -295,7 +514,7 @@ class TerraformingMarsEnv(ParallelEnv):
             #action=action-1
             
             
-
+            self.skip_full_observation[agent]=True
             player_input = self.action_lookup[agent].get(action)
             #print(f"Action: {action}/{len(self.action_lookup[agent].keys())} player_input={player_input}")
             if player_input:
@@ -350,15 +569,14 @@ class TerraformingMarsEnv(ParallelEnv):
                 #print(f"Agent {agent} selected input: {player_input}")
                 res=self.post_player_input(agent, player_input)
                 if need_sleep:
-                    sleep(0.3)
-                if isinstance(res,str) and  old_player_input is not None:
-                    #print(f"res.text={res}")
+                    
+                    #sleep(0.3)
                     pass
                 if isinstance(res,str):
                     self.rewards[agent] = -0.05
                     print(f"Failed to post player input for agent {agent} with input player_link={SERVER_BASE_URL}/player?id={self.agent_id_to_player_id[agent]}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states[agent].get('waitingSteps',{}), indent=2)}\n")
                     if 'already exists' in res:
-                        sleep(0.5)
+                        #sleep(0.1)
                         continue
                     with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'w',encoding='utf-8') as f:
                         f.write(json.dumps({
@@ -372,6 +590,9 @@ class TerraformingMarsEnv(ParallelEnv):
                     player_input=None
                     self.rewards[agent]=-5
                 else:
+                    if need_sleep:
+                        self.skip_full_observation[agent]=True
+                        self.player_states[agent]=res
                     self.rewards[agent]=0
 
             self.dones[agent] = True
@@ -475,6 +696,8 @@ class TerraformingMarsEnv(ParallelEnv):
         return self.action_spaces[agent]
     
 
-def parallel_env():
-    return TerraformingMarsEnv(['1','2'])
+def parallel_env(opponent=None):
+    env = TerraformingMarsEnv(['1','2'])
+    env.opponent_policy = opponent
+    return env
 
