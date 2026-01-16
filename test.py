@@ -1498,25 +1498,24 @@ rand=random.Random()
 i=0
 next_obs, rewards, terms, truncs, infos=(None,None,None,None,None)
 while True:
-    actions={}
     is_no_actions=True
-    for agent in env.action_lookup:
-        max_actions=len(env.action_lookup[agent].keys())
-        
-        if max_actions>1:
-            actions[agent]=rand.choice(list(env.action_lookup[agent].keys()))
-            is_no_actions=False
-        elif max_actions==1:
-            actions[agent]=rand.choice(list(env.action_lookup[agent].keys()))
-        else:
-            is_no_actions=False
-            actions[agent]=0
-        #print(f"F {agent}:{actions[agent]}/{max_actions}")
+    agent="1"
+    max_actions=len(env.action_lookup[agent].keys())
+    action=0
+    if max_actions>1:
+        action=rand.choice(list(env.action_lookup[agent].keys()))
+        is_no_actions=False
+    elif max_actions==1:
+        action=rand.choice(list(env.action_lookup[agent].keys()))
+    else:
+        is_no_actions=False
+        action=0
+    #print(f"F {agent}:{actions[agent]}/{max_actions}")
     if terms and terms.get('1',False):
         terms=None
         env=TerraformingMarsEnv(["1","2"],False,None,None,None,safe_mode=False)
     else:
-        next_obs, rewards, terms, truncs, infos=env.step(actions)
+        next_obs, rewards, terms, truncs, infos=env.step(action)
         #result[i]=next_obs['1']
         obs_new=decode_observation(next_obs['1'])
         i+=1

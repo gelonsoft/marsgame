@@ -5,6 +5,8 @@ MAX_ACTIONS=int(os.getenv('MAX_ACTIONS', "64"))
 ONE_ACTION_ARRAY_SIZE=int(os.getenv('ONE_ACTION_ARRAY_SIZE', "1024"))
 MAX_GAME_FEATURES_SIZE=int(os.getenv('MAX_GAME_FEATURES_SIZE', "1024000"))
 TOTAL_ACTIONS=MAX_ACTIONS+1
+SERVER_BASE_URL=os.environ.get('SERVER_BASE_URL','http://localhost:9976') #,"http://lev-rworker-3:9976")
+PLAYER_COLORS=['red','green','blue','orange']
 
 ALL_CARDS={}
 with open("cards.json",'r',encoding='utf-8') as f:

@@ -4,6 +4,9 @@ import torch
 from elo import Elo
 from torch.utils.tensorboard import SummaryWriter
 import json
+from datetime import datetime
+
+
 
 class ExperimentManager:
     def __init__(self, run_dir):
@@ -11,11 +14,22 @@ class ExperimentManager:
         os.makedirs(run_dir, exist_ok=True)
 
         self.elo = Elo()
+        self.elo_path = os.path.join(run_dir, "elo.json")
         self.best_agents = []   # [(name, elo)]
         self.last_save = time.time()
-
-        self.writer = SummaryWriter(log_dir=os.path.join(run_dir, "tensorboard"))
+        now = datetime.now()
+        format_string = "%Y-%m-%d-%H-%M-%S"
+        formatted_datetime = now.strftime(format_string)
+        self.writer = SummaryWriter(log_dir=os.path.join(run_dir, "tensorboard",formatted_datetime))
         self.global_step = 0
+
+        # Load previous Elo if exists
+        if os.path.exists(self.elo_path):
+            with open(self.elo_path) as f:
+                self.elo.rating = json.load(f)
+
+        self.best_pool = []   # list of (name, model)
+        self.agent_id = 0
 
     def save(self, model, name):
         path = os.path.join(self.run_dir, f"{name}.pt")
@@ -41,7 +55,7 @@ class ExperimentManager:
         # Log leaderboard
         for i, (agent, rating) in enumerate(self.best_agents):
             self.writer.add_scalar(f"leaderboard/{agent}", rating, self.global_step)
-
+        self.writer.add_scalar("elo/" + name, elo, self.global_step)
 
     def autosave(self, model, name):
         if time.time() - self.last_save > 120:

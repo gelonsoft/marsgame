@@ -1,6 +1,6 @@
 import torch
 import time
-from env import parallel_env
+from env_all_actions import parallel_env
 import random
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -14,47 +14,35 @@ class Evaluator:
     def run(self):
         while True:
             wins = 0
-
+            all_rewards={1:-1,2:-1}
             for _ in range(self.games):
                 env = parallel_env()
-                obs, _ = env.reset()
+                obs, infos, action_count, action_list = env.reset()
                 done = False
 
                 while not done:
-                    action_map={}
+                    action=0
                     for agent in ["1"]:
-                        
-                        obs_vec = torch.tensor(obs[agent], dtype=torch.float32)
+                        obs_vec = torch.tensor(obs, dtype=torch.float32)
                         policy, value, h = self.model.initial_inference(obs_vec.unsqueeze(0).to(DEVICE))
-                        acts=list(env.action_lookup[agent].keys())
-                        if len(acts)==0:
-                            action_map[agent]=0
-                        else:
+                        if action_count>0:
                             policy=policy.detach().cpu()
-                            mask = env.get_action_mask(agent)
+                            mask = env.get_action_mask(action_list)
                             masked_policy = policy * torch.tensor(mask, device=policy.device)
                             masked_policy_sum=masked_policy.sum()
                             if (masked_policy_sum.abs()>1e-18).any():
                                 masked_policy = masked_policy / masked_policy.sum()
                             masked_policy2=torch.clamp(masked_policy,1e-18,1e6)
                             action = int(torch.multinomial(masked_policy2, 1).detach().cpu())
-                            if action not in acts:
-                                action_map[agent]=random.choice(acts)
-                            else:
-                                action_map[agent]=action
-                    for agent in ["2"]:
-                        mask=env.get_action_mask(agent)
-                        acts=list(env.action_lookup[agent].keys())
-                        if len(acts)==0:
-                            acts=[0]
-                        action_map[agent]=random.choice(acts)
-                    obs, rewards, terms, truncs, infos = env.step(action_map)
-                    done = any(terms.values())
+                            if action not in action_list:
+                                action=random.choice(action_list)
+                        obs, rewards, terms, action_count,action_list,all_rewards,curr_eid = env.step(action)
+                        done = terms
 
-                if rewards["1"] > rewards["2"]:
+                if all_rewards[1] > all_rewards[2]:
                     wins += 1
 
             winrate = wins / self.games
             self.manager.log_metric("eval/winrate", winrate)
 
-            time.sleep(300)  # evaluate every 5 minutes
+            time.sleep(120)  # evaluate every 5 minutes

@@ -11,7 +11,7 @@ from collections import deque
 #prioritized replay
 
 class ReplayBuffer:
-    def __init__(self, capacity=200_000):
+    def __init__(self, capacity=2_000):
         self.buffer = deque(maxlen=capacity)
 
     def add(self, obs, action, reward, next_obs, done):

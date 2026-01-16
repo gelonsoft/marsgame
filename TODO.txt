@@ -1,2 +1,3 @@
-TODO: Card "Rotator Impacts"
-
+#TODO: 
+1. Card "Rotator Impacts"
+while true; do ls -1t /cygdrive/e/dev/marsgame/runs/muzero/*pt | awk 'NR > 5' | xargs rm -f {} \; ; find /cygdrive/e/dev/terraforming-mars/db/files/ -name '*.json' -type f -mmin +10 -delete ; echo "done";sleep 300s; done

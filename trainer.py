@@ -1,12 +1,14 @@
+import copy
 import random
 import torch
 import threading
 import time
+from promotion import play_match
 from replay import ReplayBuffer
 from muzero import MuZeroNet
 from mcts import MCTS
 from experiment_manager import ExperimentManager
-from env import parallel_env
+from env_all_actions import parallel_env
 from observe_gamestate import observe
 from evaluator import Evaluator
 
@@ -35,66 +37,50 @@ class BackgroundTrainer:
 
         self.evaluator = Evaluator(self.model, self.manager)
         self.eval_thread = threading.Thread(target=self.evaluator.run, daemon=True)
+        self.promotion_thread = threading.Thread(target=self.promotion_loop, daemon=True)
 
     def start(self):
         self.rollout_thread.start()
         self.train_thread.start()
         self.eval_thread.start()
+        #self.promotion_thread.start()
 
         while True:
             time.sleep(60)
 
     def rollout_loop(self):
         while self.running:
-            obs, _ = self.env.reset()
+            obs, infos, action_count, action_list = self.env.reset()
             self.episode += 1
             episode_reward = 0
 
             done = False
             while not done:
-                action_map={}
+                action=0
                 for agent in ["1"]:
                     
-                    obs_vec = torch.tensor(obs[agent], dtype=torch.float32,device=DEVICE)
+                    obs_vec = torch.tensor(obs, dtype=torch.float32,device=DEVICE)
                     policy = torch.tensor(self.mcts.run(obs_vec)).detach().cpu()
-                    acts=list(self.env.action_lookup[agent].keys())
-                    if len(acts)==0:
-                        action_map[agent]=0
-                    else:
+                    if action_count>0:
                         policy=policy.detach().cpu()
-                        mask = self.env.get_action_mask(agent)
+                        mask = self.env.get_action_mask(action_list)
                         masked_policy = policy * torch.tensor(mask, device=policy.device)
                         masked_policy_sum=masked_policy.sum()
                         if (masked_policy_sum.abs()>1e-18).any():
                             masked_policy = masked_policy / masked_policy.sum()
                         masked_policy2=torch.clamp(masked_policy,1e-18,1e6)
                         action = int(torch.multinomial(masked_policy2, 1).detach().cpu())
-                        if action not in acts:
-                            action_map[agent]=random.choice(acts)
-                        else:
-                            action_map[agent]=action
-                for agent in ["2"]:
-                    mask=self.env.get_action_mask(agent)
-                    acts=list(self.env.action_lookup[agent].keys())
-                    if len(acts)==0:
-                        acts=[0]
-                    action_map[agent]=random.choice(acts)
+                        if action not in action_list:
+                            action=random.choice(action_list)
 
-                # obs_vec = torch.tensor(obs["1"], dtype=torch.float32).to(DEVICE)
-                # policy = torch.tensor(self.mcts.run(obs_vec)).detach().cpu()
-                # mask = self.env.get_action_mask("1")
-                # masked_policy = policy * torch.tensor(mask, device=policy.device)
-                # masked_policy = masked_policy / masked_policy.sum()
 
-                # action = int(torch.multinomial(masked_policy, 1))
+                    next_obs, rewards, terms, action_count,action_list,all_rewards,curr_eid = self.env.step(action)#{action})
 
-                next_obs, rewards, terms, truncs, infos = self.env.step(action_map)#{"1": action, "2": action})
-
-                reward = rewards["1"]
+                reward = rewards
                 episode_reward += reward
-                done = any(terms.values())
+                done =terms
 
-                next_vec = torch.tensor(next_obs["1"], dtype=torch.float32)
+                next_vec = torch.tensor(next_obs, dtype=torch.float32)
 
                 self.replay.add(obs_vec.cpu(), action, reward, next_vec, done)
                 obs = next_obs
@@ -102,6 +88,45 @@ class BackgroundTrainer:
             # Episode finished
             self.manager.log_metric("rollout/episode_reward", episode_reward)
             self.manager.log_metric("rollout/episode", self.episode)
+
+    def promotion_loop(self):
+        while True:
+            # wait until model has trained a bit
+            if len(self.replay) < 5000:
+                time.sleep(30)
+                continue
+
+            # snapshot current agent
+            agent_copy = copy.deepcopy(self.model).cpu()
+            name = f"agent_{self.agent_id}"
+            self.agent_id += 1
+
+            # play against best agents
+            for opponent_name, opponent_model in self.best_pool:
+                result = play_match(agent_copy, opponent_model)
+
+                self.manager.elo.update(name, opponent_name, result)
+
+            # compute Elo
+            rating = self.manager.elo.get(name)
+
+            # REGISTER AGENT  ← this is what was missing
+            self.manager.register(name, rating)
+
+            # maintain best-5 pool
+            self.best_pool.append((name, agent_copy))
+            self.best_pool = sorted(
+                self.best_pool,
+                key=lambda x: self.manager.elo.get(x[0]),
+                reverse=True
+            )[:5]
+
+            # save promoted agent
+            self.manager.save(agent_copy, name)
+
+            print("Promoted:", name, "Elo:", rating)
+            time.sleep(300)   # every 5 minutes
+
 
     def train_loop(self):
         step = 0

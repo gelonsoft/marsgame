@@ -238,6 +238,7 @@ class TerraformingMarsDecisionMapper:
             #print(f"max_cards={max_cards} min_cards={min_cards} cards={cards}")
             if max_cards<1:
                 print(f"BAD MAX CARDS player_input={player_input}")
+                print(f"player_input={player_input}\r\nplayer_state={player_state}")
             #print(f"cards in card: {[card['name'] for card in cards]}")
             if len(cards)>0 and max_cards>0:
                 action_space[0]={
