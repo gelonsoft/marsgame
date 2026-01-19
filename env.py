@@ -301,11 +301,12 @@ class TerraformingMarsEnv():
 
     def _step(self,action): 
         #old_player_input=None
+        failed=False
         need_sleep=False
         action_lookup=self.action_lookup
         acts=len(action_lookup.keys())
         if acts==0:
-            return 
+            return True
         self.skip_full_observation=True
         #player_input = action_lookup.get(action)
         player_input = self.action_slot_map.get(action)
@@ -342,6 +343,12 @@ class TerraformingMarsEnv():
                         raise Exception("len(selected)<deffered['xmin']")
                     parent['cards']=selected
                     need_sleep=True
+                elif player_input["xtype"]=="xremove_first_card_choose":
+                    selected=deffered.get('selected',[])
+                    if len(selected)<=0:
+                        raise Exception("len(selected)<0")
+                    selected.pop(0)
+                    deffered['selected']=selected
                 first_deffered_action=find_first_with_nested_attr(self.deffered_actions,"__deferred_action")
                 if first_deffered_action is not None:
                     player_input=None
@@ -357,22 +364,18 @@ class TerraformingMarsEnv():
                 if isinstance(res,str):
                     reward = -0.05
                     print(f"Failed to post player input with input player_link={SERVER_BASE_URL}/player?id={self.player_id}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states.get('waitingSteps',{}), indent=2)}\n")
-                    if 'already exists' in res or 'Not waiting for anything' in res:
-
-                        #sleep(0.1)
-                        pass
-                    else:
-                        with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'w',encoding='utf-8') as f:
-                            f.write(json.dumps({
-                                "player_link": f"{SERVER_BASE_URL}/player?id={self.player_id}",
-                                "player_id": self.player_id,
-                                "player_input":player_input,
-                                "error":res,
-                                "player_state.waitingFor":self.player_states
-                            }))
-                        if self.raise_exceptions:
-                            raise Exception("Bad player actions")
-                        player_input=None
+                    failed=True
+                    with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'w',encoding='utf-8') as f:
+                        f.write(json.dumps({
+                            "player_link": f"{SERVER_BASE_URL}/player?id={self.player_id}",
+                            "player_id": self.player_id,
+                            "player_input":player_input,
+                            "error":res,
+                            "player_state.waitingFor":self.player_states
+                        }))
+                    if self.raise_exceptions:
+                        raise Exception("Bad player actions")
+                    player_input=None
                     self._update_agent_observation(True)
                 else:
                     self.skip_full_observation=True
@@ -386,7 +389,7 @@ class TerraformingMarsEnv():
         if acts==1:
             self._step(list(self.action_lookup.keys())[0])
 
-        return
+        return failed
 
 
     def save_metrics_for_reward_calc(self):
@@ -404,7 +407,7 @@ class TerraformingMarsEnv():
 
 
     def step(self, action):
-        self._step(action)
+        failed=self._step(action)
         self._update_agent_observation()
         if self.player_states.get('game',{}).get('phase',"")=="end":
             self.terminations=True
@@ -419,7 +422,7 @@ class TerraformingMarsEnv():
         
         print(f"Step {SERVER_BASE_URL}/game?id={self.game_id} ... actions: {action} of {list(self.action_lookup.keys())} isTerraformed={self.player_states.get('game',{}).get('isTerraformed',False)} self.terminations={self.terminations} phases={self.player_states.get('game',{}).get('phase',False)}")
 
-        return self.actions_count,self.actions_list,self.current_obs,self.terminations
+        return self.actions_count,self.actions_list,self.current_obs,self.terminations,failed
 
 
     

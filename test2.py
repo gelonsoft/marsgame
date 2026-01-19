@@ -5,7 +5,7 @@ import random
 from decode_observation import decode_observation
 
 env=AllActionsEnv(num_players=4,num_human_players=3,safe_mode=False)
-obs,infos,action_count,action_list=env.reset()
+obs,infos,action_count,action_list,current_env_id=env.reset()
 MAX_ROWS=10000
 
 #with open("")
@@ -23,11 +23,11 @@ while True:
         #env.current_obs,-1,True,0,[],{i:-1 for i in range(self.num_players)},self.last_env
         for e in env.envs:
             print()
-        obs_new=decode_observation(obs)
+        #obs_new=decode_observation(obs)
     elif terms:
         terms=False
         print(f"Done game rewards={all_rewards}")
-        obs,infos,action_count,action_list=env.reset()
+        obs,infos,action_count,action_list,current_env=env.reset()
     else:
         print("Strange")
         raise Exception(f"Strange {action_count} {terms}")

@@ -29,7 +29,7 @@ def one_hot_encode(value, categories):
         encoding[categories.index(value)] = 1
     return encoding
     
-def encode_action(action: Dict[str, Any]) -> np.ndarray:
+def encode_action(action: Dict[str, Any],is_main=True) -> np.ndarray:
     """Encodes any action into a fixed 1024-dimension feature vector with categorical card encoding"""
     action_vec = np.zeros(ONE_ACTION_ARRAY_SIZE, dtype=np.float32)
     
@@ -44,7 +44,7 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
         "colony", "delegate", "option", "party", "payment",
         "player", "productionToLose", "projectCard", "space",
         "aresGlobalParameters", "globalEvent", "policy",
-        "resource", "resources","xcard_choose","xconfirm_card_choose","xpayment"
+        "resource", "resources","xcard_choose","xconfirm_card_choose","xremove_first_card_choose","xpayment"
     ]
     if action_type in action_types:
         action_vec[0] = action_types.index(action_type) / len(action_types)  # Normalized categorical
@@ -52,19 +52,19 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
     # Action-specific features
     if action_type == "and":
         # Encode nested actions (positions 1-512)
-        for i, resp in enumerate(action.get("responses", [])[:8]):  # Max 8 nested
-            action_vec[1+i*64:1+(i+1)*64] = encode_action(resp)[:64]
+        for i, resp in enumerate(action.get("responses", [])[:7]):  # Max 8 choices
+            action_vec[1+i*8:1+(i+1)*8] = encode_action(resp,False)[:8]
     
     elif action_type == "or":
         action_vec[1] = action.get("index", 0) / 10.0  # Normalized index
         # Encode selected response (positions 2-65)
         if "response" in action:
-            action_vec[2:66] = encode_action(action["response"])[:64]
+            action_vec[2:63] = encode_action(action["response"],False)[:61]
     
     elif action_type == "initialCards":
         # Encode all initial card choices (positions 1-512)
-        for i, resp in enumerate(action.get("responses", [])[:8]):  # Max 8 choices
-            action_vec[1+i*64:1+(i+1)*64] = encode_action(resp)[:64]
+        for i, resp in enumerate(action.get("responses", [])[:7]):  # Max 8 choices
+            action_vec[1+i*8:1+(i+1)*8] = encode_action(resp,False)[:8]
     
     elif action_type == "amount":
         action_vec[1] = action.get("amount", 0) / 50.0
@@ -75,22 +75,24 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
         # 2. Categorical encoding for cards (positions 1-256)
         cards = action.get("cards", [])
         if isinstance(cards,dict):
-            action_vec[1:1+64]=encode_action(cards)[:64]
+            action_vec[1:64]=encode_action(cards,False)[:63]
         else:
-            for i, card in enumerate(cards[:256]):  # Max 256 cards
+            for i, card in enumerate(cards[:63]):  # Max 256 cards
                 if card["name"] in ALL_CARD_NAMES:
-                    action_vec[1+i] = (ALL_CARD_NAMES.index(card["name"]) + 1) / len(ALL_CARD_NAMES)  # Normalized index
+                    action_vec[1+i] = (hash(card['name']) % 1000) / 1000.0  # Normalized index
             
             # Additional card features (positions 257-320)
-            for i, card in enumerate(cards[:64]):
-                action_vec[257+i] = card.get("calculatedCost", 0) / 50.0
-                action_vec[321+i] = float("science" in card.get("tags", {}))
-                action_vec[385+i] = float("building" in card.get("tags", {}))
+            #for i, card in enumerate(cards[:64]):
+            #    action_vec[257+i] = card.get("calculatedCost", 0) / 50.0
+            #    action_vec[321+i] = float("science" in card.get("tags", {}))
+            #    action_vec[385+i] = float("building" in card.get("tags", {}))
     elif action_type == "xcard_choose":
         card = action.get("xoption", {})
-        action_vec[1] = (ALL_CARD_NAMES.index(card["name"]) + 1) / len(ALL_CARD_NAMES)  # Normalized index
+        action_vec[1] = (hash(card['name']) % 1000) / 1000.0  # Normalized index
 
     elif action_type == "xconfirm_card_choose":
+        action_vec[1]=1.0
+    elif action_type == "xremove_first_card_choose":
         action_vec[1]=1.0
 
     elif action_type == "colony":
@@ -146,22 +148,37 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
         action_vec[3] = units.get("steel", 0) / 5.0
     
     elif action_type == "projectCard":
-        action_vec[1] = float("card" in action)
+        action_vec[1] = float((hash(action.get('card')) % 1000)/1000.0)
         # Categorical encoding for project cards (positions 2-257)
         cards = action.get("cards", [])
-        for i, card in enumerate(cards[:256]):
+        for i, card in enumerate(cards[:48]):
             if card["name"] in ALL_CARD_NAMES:
-                action_vec[2+i] = (ALL_CARD_NAMES.index(card["name"]) + 1) / len(ALL_CARD_NAMES)
-        
-        # Payment details (positions 258-262)
+                action_vec[2+i] = (hash(card["name"]) % 1000)/1000.0
         if "payment" in action:
             payment = action["payment"]
-            action_vec[258] = payment.get("megaCredits", 0) / 100.0
-            action_vec[259] = payment.get("steel", 0) / 20.0
-            action_vec[260] = payment.get("titanium", 0) / 20.0
+            action_vec[50] = payment.get("megaCredits", 0) / 100.0
+            action_vec[51] = payment.get("steel", 0) / 20.0
+            action_vec[52] = payment.get("titanium", 0) / 20.0
+            action_vec[53] = payment.get("heat", 0) / 20.0
+            action_vec[54] = payment.get("plants", 0) / 20.0
+            action_vec[55] = payment.get("microbes", 0) / 20.0
+            action_vec[56] = payment.get("floaters", 0) / 20.0
+            action_vec[57] = payment.get("lunaArchivesScience", 0) / 20.0
+            action_vec[58] = payment.get("spireScience", 0) / 20.0
+            action_vec[59] = payment.get("seeds", 0) / 20.0
+            action_vec[60] = payment.get("auroraiData", 0) / 20.0
+            action_vec[61] = payment.get("graphene", 0) / 20.0
+            action_vec[62] = payment.get("kuiperAsteroids", 0) / 20.0
+            action_vec[63] = payment.get("corruption", 0) / 20.0
+
+        
+        # Payment details (positions 258-262)
+
     
     elif action_type == "space":
         # Categorical encoding for spaces (positions 1-512)
+        sid=action.get("spaceId", "0")
+        action_vec[1]=int(sid) / 100.0 if sid.isdigit() else 0.0
         spaces = action.get("spaces", [])
         for i, space in enumerate(spaces[:512]):
             #action_vec[1+i] = hash(space.get("id", "")) % 1000 / 1000  # Simple categorical encoding
@@ -169,9 +186,9 @@ def encode_action(action: Dict[str, Any]) -> np.ndarray:
             action_vec[1+i] = int(sid) / 100.0 if sid.isdigit() else 0.0
         
         # Space features (positions 513-576)
-        for i, space in enumerate(spaces[:64]):
-            action_vec[513+i] = float("city" in str(space.get("tileType", "")))
-            action_vec[577+i] = len(space.get("bonus", [])) / 5.0
+        #for i, space in enumerate(spaces[:64]):
+        #    action_vec[513+i] = float("city" in str(space.get("tileType", "")))
+        #    action_vec[577+i] = len(space.get("bonus", [])) / 5.0
     
     elif action_type == "aresGlobalParameters":
         params = action.get("response", {})

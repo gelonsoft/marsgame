@@ -41,6 +41,17 @@ def metrics(run):
 
     return jsonify(metrics)
 
+@app.route("/api/promotions")
+def promotions():
+    path = os.path.join(RUNS_DIR, "muzero", "promotion_stats.json")
+    if not os.path.exists(path):
+        return jsonify([])
+
+    with open(path) as f:
+        data = json.load(f)
+
+    return jsonify(data)
+
 def broadcast_leaderboard():
     while True:
         for run in os.listdir(RUNS_DIR):

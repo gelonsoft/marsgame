@@ -229,7 +229,7 @@ def reward_function(player_state_before: dict, player_state_after: dict) -> floa
     # 27. Production Imbalance Penalty
     # ============================
     prod_vals = [player_after[k] for k in prod_keys]
-    reward -= np.std(prod_vals) * 0.05
+    reward -= float(np.std(prod_vals) * 0.05)
 
     # ============================
     # 28. Card Spam Penalty

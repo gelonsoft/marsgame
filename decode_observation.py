@@ -116,7 +116,7 @@ def decode_observation(observation: np.ndarray) -> Dict[str, Any]:
         "colony", "delegate", "option", "party", "payment",
         "player", "productionToLose", "projectCard", "space",
         "aresGlobalParameters", "globalEvent", "policy",
-        "resource", "resources", "xcard_choose", "xconfirm_card_choose", "xpayment"
+        "resource", "resources", "xcard_choose", "xconfirm_card_choose","xremove_first_card_choose", "xpayment"
     ]
     
     for i in range(MAX_ACTIONS):

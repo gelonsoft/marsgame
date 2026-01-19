@@ -401,6 +401,11 @@ class TerraformingMarsEnv(ParallelEnv):
                         raise Exception("len(selected)<deffered['xmin']")
                     parent['cards']=selected
                     need_sleep=True
+                elif player_input["xtype"]=="xremove_first_card_choose":
+                    selected=deffered.get('selected',[])
+                    if len(selected)<=0:
+                        raise Exception("len(selected)<0")
+                    deffered['selected']=selected.pop(0)
                 first_deffered_action=find_first_with_nested_attr(self.deffered_actions[agent],"__deferred_action")
                 if first_deffered_action is not None:
                     player_input=None

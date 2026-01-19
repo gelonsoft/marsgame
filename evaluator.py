@@ -17,7 +17,7 @@ class Evaluator:
             all_rewards={1:-1,2:-1}
             for _ in range(self.games):
                 env = parallel_env()
-                obs, infos, action_count, action_list = env.reset()
+                obs, infos, action_count, action_list,current_env_id = env.reset()
                 done = False
 
                 while not done:

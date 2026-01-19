@@ -96,6 +96,13 @@ class TerraformingMarsDecisionMapper:
                                 "xtype":'xconfirm_card_choose'
                         }
                         i=i+1
+                    if len(selected_cards)>1: 
+                        action_space[i]={
+                                "type":"deffered",
+                                "xid":deffered["xid"],
+                                "xtype":'xremove_first_card_choose'
+                        }
+                        i=i+1
                     for c in deffered['xoptions']:
                         if c['name'] not in selected_cards:
                             action_space[i]={
