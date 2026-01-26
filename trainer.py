@@ -29,7 +29,7 @@ class BackgroundTrainer:
         self.optimizer=None
         if self.enable_train:
             self.replay = ReplayBuffer(
-                capacity=100_000,           # disk capacity
+                capacity=500_000,           # disk capacity
                 obs_dim=obs_dim,
                 action_dim=action_dim,
                 device=DEVICE,
@@ -37,13 +37,19 @@ class BackgroundTrainer:
                 cache_size=1024             # RAM window (~270MB)
             )
             self.model = MuZeroNet(obs_dim, action_dim).to(DEVICE)
-            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1e-4)
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(),
+                lr=1e-4,
+                weight_decay=1e-4,
+                betas=(0.9, 0.999),
+                eps=1e-8
+            )
         self.obs_dim=obs_dim
         self.action_dim=action_dim
         self.episode = 0
         self.win_counter = 0
         
-        self.mcts = MCTS(self.model, action_dim)
+        self.mcts = MCTS(self.model, action_dim, sims=32,discount=0.997)
         self.manager = ExperimentManager(os.path.join("runs","muzero"))
 
         if self.enable_train:
@@ -72,8 +78,9 @@ class BackgroundTrainer:
             time.sleep(60)
 
     def rollout_loop(self):
+        replay_data={}
         while self.running:
-            if len(self.replay) > 100_000:
+            if len(self.replay) > 500_000:
                 time.sleep(1)
                 continue
             obs, infos, action_count, action_list,current_env_id = self.env.reset()
@@ -85,7 +92,7 @@ class BackgroundTrainer:
                 while not done:
                     action=0
                     obs_vec = torch.tensor(obs, dtype=torch.float32,device=DEVICE)
-                    policy = torch.tensor(self.mcts.run(obs_vec)).detach().cpu()
+                    policy = torch.tensor(self.mcts.run(obs_vec,legal_actions=action_list,temperature=1.0,training=True,)).detach().cpu()
                     policy=policy.detach().cpu()
                     policy = policy + 1e-8               # avoid zeros
                     policy = policy / policy.sum()       # normalize
@@ -104,13 +111,27 @@ class BackgroundTrainer:
 
                     next_obs, rewards, terms, action_count,action_list,all_rewards,curr_eid = self.env.step(action)#{action})
 
-                    reward = max(-1.0, min(1.0, rewards))
+                    reward = float(max(-1.0, min(1.0, rewards)))
                     episode_reward += reward
                     done =terms
 
                     next_vec = torch.tensor(next_obs, dtype=torch.float32)
+                    if curr_eid==current_env_id:
+                        self.replay.add(obs_vec.cpu(), action, reward, next_vec, done, policy)
+                    else:
+                        replay_data[current_env_id]={
+                            'obs':obs_vec.cpu(),
+                            'action':action,
+                            'reward':reward,
+                            'done':done,
+                            'policy':policy
+                        }
+                        if curr_eid in replay_data:
+                            r=replay_data[curr_eid]
+                            self.replay.add(r['obs'], r['action'], r['reward'], next_vec, r['done'], r['policy'])
+                        current_env_id=curr_eid
 
-                    self.replay.add(obs_vec.cpu(), action, reward, next_vec, done, policy)
+
                     obs = next_obs
 
                 # Episode finished
@@ -239,7 +260,7 @@ class BackgroundTrainer:
 
             obs, act, rew, next_obs, done, policy_target = self.replay.sample(256)
             policy_target = policy_target + 1e-8               # avoid zeros
-            policy_target = policy_target / policy_target.sum()       # normalize
+            policy_target = policy_target / policy_target.sum(dim=1, keepdim=True)       # normalize
             obs = obs.to(DEVICE)
             next_obs = next_obs.to(DEVICE)
             rew = rew.to(DEVICE)
@@ -249,7 +270,7 @@ class BackgroundTrainer:
 
             with torch.no_grad():
                 _, next_value, _ = self.model.initial_inference(next_obs)
-                target_value = rew + 0.997 * next_value.squeeze() * (1 - done)
+                target_value = rew + 0.997 * next_value.squeeze() * (1 - done.float())
 
             #loss = ((value.squeeze() - rew) ** 2).mean()
             value_loss = ((value.squeeze() - target_value) ** 2).mean()

@@ -18,8 +18,9 @@ obs, infos, action_count, action_list,current_env_id = env.reset()
 obs_dim = len(obs)
 action_dim = MAX_ACTIONS
 
-
 print(obs_dim)
+print(MAX_ACTIONS)
+
 env=None
 trainer = BackgroundTrainer(args,obs_dim, action_dim)
 trainer.start()

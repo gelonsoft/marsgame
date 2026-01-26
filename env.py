@@ -178,8 +178,16 @@ class TerraformingMarsEnv():
         for i, action in enumerate(legal.values()):
             if i>=MAX_ACTIONS:
                 continue
-            slot = slots[i]
-            slot_map[slot] = action
+            slot = hash(json.dumps(action, sort_keys=True)) % MAX_ACTIONS
+            if slot in slot_map:
+                for jj in range(MAX_ACTIONS):
+                    if jj in slot_map:
+                        continue
+                    slot=jj
+                    slot_map[slot]=action
+                    break
+            else:
+                slot_map[slot] = action
             reverse_map[slot] = i
 
         self.action_slot_map = slot_map
@@ -310,6 +318,7 @@ class TerraformingMarsEnv():
         self.skip_full_observation=True
         #player_input = action_lookup.get(action)
         player_input = self.action_slot_map.get(action)
+        print(f"Action={player_input}")
         if player_input is not None:
             if self.deffered_actions is None:
                 first_deffered_action=find_first_with_nested_attr(player_input,"__deferred_action")
@@ -407,6 +416,7 @@ class TerraformingMarsEnv():
 
 
     def step(self, action):
+        
         failed=self._step(action)
         self._update_agent_observation()
         if self.player_states.get('game',{}).get('phase',"")=="end":
