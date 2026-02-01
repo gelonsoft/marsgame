@@ -15,7 +15,7 @@ from decision_mapper import TerraformingMarsDecisionMapper
 import logging
 import os
 from decode_observation import decode_observation
-from reward import reward_function
+from reward_simple import reward_function
 
 logging.basicConfig(level=logging.INFO)  # Set the logging level to DEBUG
 
@@ -318,7 +318,7 @@ class TerraformingMarsEnv():
         self.skip_full_observation=True
         #player_input = action_lookup.get(action)
         player_input = self.action_slot_map.get(action)
-        print(f"Action={player_input}")
+        #print(f"Action={player_input}")
         if player_input is not None:
             if self.deffered_actions is None:
                 first_deffered_action=find_first_with_nested_attr(player_input,"__deferred_action")
@@ -430,7 +430,7 @@ class TerraformingMarsEnv():
                     if p.get('id','')==self.player_id:
                         self.rewards=p.get('victoryPointsBreakdown',{}).get('total',0)/100.0
         
-        print(f"Step {SERVER_BASE_URL}/game?id={self.game_id} ... actions: {action} of {list(self.action_lookup.keys())} isTerraformed={self.player_states.get('game',{}).get('isTerraformed',False)} self.terminations={self.terminations} phases={self.player_states.get('game',{}).get('phase',False)}")
+        #print(f"Step {SERVER_BASE_URL}/game?id={self.game_id} ... actions: {action} of {list(self.action_lookup.keys())} isTerraformed={self.player_states.get('game',{}).get('isTerraformed',False)} self.terminations={self.terminations} phases={self.player_states.get('game',{}).get('phase',False)}")
 
         return self.actions_count,self.actions_list,self.current_obs,self.terminations,failed
 

@@ -76,8 +76,8 @@ class AllActionsEnv(ParallelEnv):
         env=self.envs[self.last_env]
         no_steps=0
         if self.no_steps_count>3:
-            print(f"Bad no steps2 game={self.game_id}")
-            print(f"Reward={-1.0}")
+            #print(f"Bad no steps2 game={self.game_id}")
+            #print(f"Reward={-1.0}")
             return env.current_obs,-1.0,True,0,[],{i:self.envs[i].player_states.get('thisPlayer',{}).get('victoryPointsBreakdown',{}).get('total',0) for i in range(self.num_players)},self.last_env
         if env.actions_count>0:
             env.save_metrics_for_reward_calc()
@@ -92,7 +92,7 @@ class AllActionsEnv(ParallelEnv):
             if actions_count>0 and not terminations:
                 self.no_steps_count=0 if not failed else self.no_steps_count+1
                 #print(f"Changed no_steps_count #1 to {self.no_steps_count}")
-                print(f"Reward={rewards}")
+                #print(f"Reward={rewards}")
                 return obs,rewards,terminations,actions_count,action_list,{i:self.envs[i].player_states.get('thisPlayer',{}).get('victoryPointsBreakdown',{}).get('total',0) for i in range(self.num_players)},self.last_env
         z=0
         eid=self.last_env
@@ -124,7 +124,7 @@ class AllActionsEnv(ParallelEnv):
                         _,_,_,_,failed=env.step(env.actions_list[0])
                         no_steps=0 if not failed else no_steps+1
                     self.no_steps_count=0 if not failed else self.no_steps_count+1
-                    print(f"Reward={rewards}")
+                    #print(f"Reward={rewards}")
                     return env.current_obs,rewards,env.terminations,env.actions_count,env.actions_list,self.rewards,self.last_env
             else:
                 no_steps+=1
@@ -144,10 +144,10 @@ class AllActionsEnv(ParallelEnv):
             print(f"Reward={rewards}")
             return env.current_obs,rewards,env.terminations,env.actions_count,env.actions_list,self.rewards,self.last_env
         else:
-            print(f"Bad no steps game={self.game_id}")
+            #print(f"Bad no steps game={self.game_id}")
             self.no_steps_count+=1
             #print(f"Changed no_steps_count #5 to {self.no_steps_count}")
-            print(f"Reward={-1}")
+            #print(f"Reward={-1}")
             return env.current_obs,-1,True,0,[],{i:self.envs[i].player_states.get('thisPlayer',{}).get('victoryPointsBreakdown',{}).get('total',0) for i in range(self.num_players)},self.last_env
 
     def observation_space(self, agent):
