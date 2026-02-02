@@ -5,7 +5,12 @@ MAX_ACTIONS=int(os.getenv('MAX_ACTIONS', "64"))
 ONE_ACTION_ARRAY_SIZE=int(os.getenv('ONE_ACTION_ARRAY_SIZE', "64"))
 MAX_GAME_FEATURES_SIZE=int(os.getenv('MAX_GAME_FEATURES_SIZE', "1024000"))
 TOTAL_ACTIONS=MAX_ACTIONS+1
-SERVER_BASE_URL=os.environ.get('SERVER_BASE_URL','http://localhost:9976') #,"http://lev-rworker-3:9976")
+SERVER_BASE_URL= [
+    'http://localhost:8081',
+    'http://localhost:8082',
+    'http://localhost:8083',
+    'http://localhost:8084',
+ ] #os.environ.get('SERVER_BASE_URL','http://localhost:9976') #,"http://lev-rworker-3:9976")
 PLAYER_COLORS=['red','green','blue','orange','yellow','black']
 
 ALL_CARDS={}

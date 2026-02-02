@@ -1,9 +1,10 @@
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 from collections import defaultdict
 import json
 from jsonpath_ng.ext import parse
-from myconfig import MAX_ACTIONS, ONE_ACTION_ARRAY_SIZE, MAX_GAME_FEATURES_SIZE, TOTAL_ACTIONS
+from myconfig import MAX_ACTIONS, MAX_GAME_FEATURES_SIZE
+from factored_actions import ACTION_TYPE_DIM, OBJECT_ID_DIM, PAYMENT_ID_DIM, EXTRA_PARAM_DIM
 from myutils import create_fixed_size_array
 
 with open("gs.schema.formatted.json", 'rb') as f:
@@ -39,101 +40,7 @@ def safe_divide(numerator, denominator, default=0.0):
         return default
     return numerator / denominator
 
-def encode_action(action: Dict[str, Any], is_main=True) -> np.ndarray:
-    """
-    IMPROVED: More efficient action encoding with better feature extraction
-    """
-    action_vec = np.zeros(ONE_ACTION_ARRAY_SIZE, dtype=np.float32)
-    
-    if not action:
-        return action_vec
-    
-    action_type = action.get("xtype", action.get("type", ""))
-    
-    # Action type encoding (categorical)
-    action_types = [
-        "and", "or", "initialCards", "amount", "card",
-        "colony", "delegate", "option", "party", "payment",
-        "player", "productionToLose", "projectCard", "space",
-        "aresGlobalParameters", "globalEvent", "policy",
-        "resource", "resources", "xcard_choose", "xconfirm_card_choose",
-        "xremove_first_card_choose", "xpayment"
-    ]
-    
-    if action_type in action_types:
-        action_vec[0] = action_types.index(action_type) / len(action_types)
-    
-    # Type-specific encoding (more compact)
-    if action_type == "and":
-        for i, resp in enumerate(action.get("responses", [])[:8]):
-            action_vec[1 + i * 8:1 + (i + 1) * 8] = encode_action(resp, False)[:8]
-    
-    elif action_type == "or":
-        action_vec[1] = action.get("index", 0) / 10.0
-        if "response" in action:
-            action_vec[2:34] = encode_action(action["response"], False)[:32]
-    
-    elif action_type == "amount":
-        action_vec[1] = normalize(action.get("amount", 0), 0, 50)
-        action_vec[2] = normalize(action.get("min", 0), 0, 50)
-        action_vec[3] = normalize(action.get("max", 0), 0, 50)
-    
-    elif action_type == "card":
-        cards = action.get("cards", [])
-        if isinstance(cards, dict):
-            action_vec[1:33] = encode_action(cards, False)[:32]
-        else:
-            for i, card in enumerate(cards[:32]):
-                if card.get("name") in ALL_CARD_NAMES:
-                    action_vec[1 + i] = (hash(card['name']) % 1000) / 1000.0
-    
-    elif action_type in ["xcard_choose", "xpayment", "xconfirm_card_choose", "xremove_first_card_choose"]:
-        if action_type == "xcard_choose":
-            card = action.get("xoption", {})
-            action_vec[1] = (hash(card.get('name', '')) % 1000) / 1000.0
-        elif action_type in ["xconfirm_card_choose", "xremove_first_card_choose"]:
-            action_vec[1] = 1.0
-        elif action_type == "xpayment":
-            payment = action.get("xoption", {})
-            _encode_payment(action_vec, payment, offset=1)
-    
-    elif action_type == "payment":
-        payment = action.get("payment", {})
-        _encode_payment(action_vec, payment, offset=1)
-    
-    elif action_type == "projectCard":
-        action_vec[1] = (hash(str(action.get('card', ''))) % 1000) / 1000.0
-        cards = action.get("cards", [])
-        for i, card in enumerate(cards[:24]):
-            if card.get("name") in ALL_CARD_NAMES:
-                action_vec[2 + i] = (hash(card["name"]) % 1000) / 1000.0
-        if "payment" in action:
-            _encode_payment(action_vec, action["payment"], offset=26)
-    
-    elif action_type == "space":
-        sid = action.get("spaceId", "0")
-        action_vec[1] = int(sid) / 100.0 if sid.isdigit() else 0.0
-        spaces = action.get("spaces", [])
-        for i, space in enumerate(spaces[:32]):
-            sid = space.get("id", "0")
-            action_vec[2 + i] = int(sid) / 100.0 if sid.isdigit() else 0.0
-    
-    return action_vec
-
-def _encode_payment(vec, payment, offset):
-    """Helper to encode payment information"""
-    payment_keys = [
-        "megaCredits", "steel", "titanium", "heat", "plants",
-        "microbes", "floaters", "lunaArchivesScience", "spireScience",
-        "seeds", "auroraiData", "graphene", "kuiperAsteroids", "corruption"
-    ]
-    max_vals = [100, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
-    
-    for i, (key, max_val) in enumerate(zip(payment_keys, max_vals)):
-        if offset + i < len(vec):
-            vec[offset + i] = normalize(payment.get(key, 0), 0, max_val)
-
-def observe(player_view_model: Dict[str, Any], action_slot_map: Dict[str, Any]) -> np.ndarray:
+def observe(player_view_model: Dict[str, Any], factored_legal: Union[Dict[int, tuple],None] = None) -> np.ndarray:
     """
     IMPROVED: More efficient observation with better feature engineering
     """
@@ -471,29 +378,54 @@ def observe(player_view_model: Dict[str, Any], action_slot_map: Dict[str, Any]) 
     # ============================
     # Create fixed-size observation
     # ============================
+    # --- Action-context features (Change 3: MCTS prediction helpers) ------
+    # These lightweight summary statistics of the legal action set let the
+    # dynamics network predict which actions will be available after a step,
+    # dramatically improving lookahead quality without bloating obs size.
+    #
+    # Layout (appended before create_fixed_size_array so they share the 512 budget):
+    #   [0]      num_legal / MAX_ACTIONS            — action-set density
+    #   [1..16]  action_type histogram (16 bins)    — what *kinds* of decisions are available
+    #   [17]     mean object_id / OBJECT_ID_DIM     — avg complexity of targets
+    #   [18]     mean payment_id / PAYMENT_ID_DIM   — avg payment complexity
+    #   [19..23] waiting_for type one-hot (5 bins)  — which sub-prompt generated this set
+    #            (or, card, and, payment, deferred)
+    # -----------------------------------------------------------------------
+    action_ctx = []
+    if factored_legal and len(factored_legal) > 0:
+        num_legal = len(factored_legal)
+        action_ctx.append(normalize(num_legal, 0, MAX_ACTIONS))
+
+        # Type histogram
+        type_hist = np.zeros(ACTION_TYPE_DIM, dtype=np.float32)
+        obj_sum = 0.0
+        pay_sum = 0.0
+        for slot, (t, o, p, e) in factored_legal.items():
+            type_hist[t] += 1.0
+            obj_sum += o
+            pay_sum += p
+        type_hist = type_hist / num_legal  # normalise to probability
+        action_ctx.extend(type_hist.tolist())
+
+        action_ctx.append(obj_sum / num_legal / max(OBJECT_ID_DIM, 1))
+        action_ctx.append(pay_sum / num_legal / max(PAYMENT_ID_DIM, 1))
+    else:
+        action_ctx.append(0.0)
+        action_ctx.extend([0.0] * ACTION_TYPE_DIM)
+        action_ctx.extend([0.0, 0.0])
+
+    # waiting_for type one-hot (5 bins: or, card, and, payment, deferred)
+    waiting_for = player_view_model.get("waitingFor", {})
+    wf_type = waiting_for.get("type", "") if isinstance(waiting_for, dict) else ""
+    wf_categories = ["or", "card", "and", "payment", "deffered"]
+    action_ctx.extend(one_hot_encode(wf_type, wf_categories))
+
+    features.extend(action_ctx)
+
     observation = create_fixed_size_array(data_list=features, fixed_size=512)
-    
-    # ============================
-    # 15. Available Actions Encoding
-    # ============================
-    action_features = np.zeros((MAX_ACTIONS, ONE_ACTION_ARRAY_SIZE), dtype=np.float32)
-    
-    if action_slot_map:
-        for slot, action in action_slot_map.items():
-            feats = encode_action(action)
-            action_features[int(slot)] = feats
-    
-    # Concatenate all features
-    observation = np.concatenate([
-        observation,
-        action_features.flatten()
-    ])
-    
+
     # Final processing
     observation = np.nan_to_num(observation, nan=0.0, posinf=1.0, neginf=-1.0)
     observation = np.clip(observation, -10, 10)
     
     return observation
-
-def get_actions_shape():
-    return np.zeros(TOTAL_ACTIONS, dtype=np.float32).shape

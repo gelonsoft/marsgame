@@ -90,24 +90,29 @@ class AttentionBlock(nn.Module):
 
 
 class MuZeroNet(nn.Module):
-    def __init__(self, obs_dim=4608, action_dim=64, latent_dim=1024):
+    def __init__(self, obs_dim=512, action_dim=64, latent_dim=1024):
         super().__init__()
         
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.latent_dim = latent_dim
 
+        # Factored action dimensions (must match factored_actions.py)
+        from factored_actions import FACTORED_ACTION_DIMS
+        self.factored_action_dims = FACTORED_ACTION_DIMS          # (16, 32, 16, 16)
+        self.factored_action_total = sum(FACTORED_ACTION_DIMS)    # 80
+
         # -------- Representation Network --------
         # IMPROVED: Better architecture with gradual dimension reduction
         self.representation = nn.Sequential(
-            nn.Linear(obs_dim, 2048),
+            nn.Linear(obs_dim, 8192),
             nn.GELU(),
-            nn.LayerNorm(2048),
+            nn.LayerNorm(8192),
             nn.Dropout(0.1),
 
-            ResidualBlock(2048, dropout=0.1),
+            ResidualBlock(8192, dropout=0.1),
             
-            nn.Linear(2048, 1536),
+            nn.Linear(8192, 1536),
             nn.GELU(),
             nn.LayerNorm(1536),
             nn.Dropout(0.1),
@@ -124,9 +129,10 @@ class MuZeroNet(nn.Module):
         )
 
         # -------- Dynamics Network --------
-        # IMPROVED: Better dynamics with attention
+        # Input is now the concatenation of 4 factored one-hots (80-dim)
+        # instead of a single flat one-hot (64-dim).
         self.dynamics_input = nn.Sequential(
-            nn.Linear(latent_dim + action_dim, 1024),
+            nn.Linear(latent_dim + self.factored_action_total, 1024),
             nn.GELU(),
             nn.LayerNorm(1024),
             nn.Dropout(0.1)
@@ -145,9 +151,8 @@ class MuZeroNet(nn.Module):
         )
 
         # -------- Prediction Heads --------
-        # IMPROVED: Separate prediction networks for better learning
         
-        # Reward head
+        # Reward head (unchanged)
         self.reward_head = nn.Sequential(
             nn.Linear(latent_dim, 512),
             nn.GELU(),
@@ -159,21 +164,26 @@ class MuZeroNet(nn.Module):
             nn.Linear(256, 1)
         )
 
-        # Policy head with MoE
+        # Shared MoE trunk for all policy heads
         self.policy_moe = MoELayer(latent_dim, num_experts=4, hidden=1024, top_k=2)
-        
-        self.policy_head = nn.Sequential(
-            nn.Linear(latent_dim, 512),
-            nn.GELU(),
-            nn.LayerNorm(512),
-            nn.Dropout(0.1),
-            nn.Linear(512, 256),
-            nn.GELU(),
-            nn.LayerNorm(256),
-            nn.Linear(256, action_dim)
-        )
 
-        # Value head
+        # --- 4 Factored Policy Heads (stationary) ---
+        # Each head shares the same MoE-transformed latent but has its own
+        # linear projection.  Heads are masked independently at inference time.
+        self.policy_heads = nn.ModuleList()
+        for head_dim in self.factored_action_dims:
+            self.policy_heads.append(nn.Sequential(
+                nn.Linear(latent_dim, 512),
+                nn.GELU(),
+                nn.LayerNorm(512),
+                nn.Dropout(0.1),
+                nn.Linear(512, 256),
+                nn.GELU(),
+                nn.LayerNorm(256),
+                nn.Linear(256, head_dim)
+            ))
+
+        # Value head (unchanged)
         self.value_head = nn.Sequential(
             nn.Linear(latent_dim, 512),
             nn.GELU(),
@@ -201,27 +211,41 @@ class MuZeroNet(nn.Module):
 
     def initial_inference(self, obs):
         """
-        Initial inference from observation
-        Returns: policy logits, value, hidden state
+        Initial inference from observation.
+        Returns: list of 4 policy-head logits, value scalar, hidden state.
         """
         h = self.representation(obs)
         
-        # Get policy
+        # Shared MoE trunk
         policy_latent = self.policy_moe(h)
-        policy = self.policy_head(policy_latent)
+
+        # 4 factored policy heads
+        policy_heads = [head(policy_latent) for head in self.policy_heads]
         
         # Get value
         value = self.value_head(h)
         
-        return policy, value, h
+        return policy_heads, value, h
 
-    def recurrent_inference(self, h, action_onehot):
+    def recurrent_inference(self, h, action_factored):
         """
-        Recurrent inference from hidden state and action
-        Returns: policy logits, value, reward, next hidden state
+        Recurrent inference from hidden state and factored action.
+
+        Parameters
+        ----------
+        h : Tensor [B, latent_dim]
+        action_factored : Tensor [B, sum(FACTORED_ACTION_DIMS)]
+            Concatenation of 4 one-hot vectors (type, obj, pay, extra).
+
+        Returns
+        -------
+        policy_heads : list of 4 Tensors [B, head_dim]
+        value : Tensor [B, 1]
+        reward : Tensor [B, 1]
+        h_next : Tensor [B, latent_dim]
         """
         # Dynamics step
-        x = torch.cat([h, action_onehot], dim=-1)
+        x = torch.cat([h, action_factored], dim=-1)
         x = self.dynamics_input(x)
         x = self.dynamics_core(x)
         h_next = self.dynamics_output(x)
@@ -232,14 +256,14 @@ class MuZeroNet(nn.Module):
         # Predict reward
         reward = self.reward_head(h_next)
         
-        # Get policy
+        # Factored policy heads
         policy_latent = self.policy_moe(h_next)
-        policy = self.policy_head(policy_latent)
+        policy_heads = [head(policy_latent) for head in self.policy_heads]
         
         # Get value
         value = self.value_head(h_next)
         
-        return policy, value, reward, h_next
+        return policy_heads, value, reward, h_next
     
     def get_num_parameters(self):
         """Utility to count parameters"""

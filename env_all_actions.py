@@ -1,3 +1,16 @@
+"""
+AllActionsEnv - Multi-player Parallel Environment for Terraforming Mars
+
+This environment manages multiple TerraformingMarsEnv instances (one per player)
+and coordinates turn-taking between human-controlled and random AI players.
+
+FACTORED ACTION INTEGRATION:
+----------------------------
+The step() method has been updated to return factored action metadata from
+the active player's environment so that MCTS can use it for the next action
+selection. Returns extended 12-tuple instead of legacy 7-tuple.
+"""
+
 import random
 import time
 from typing import List
@@ -9,6 +22,7 @@ from myconfig import MAX_ACTIONS
 
 class AllActionsEnv(ParallelEnv):
     def __init__(self,num_players=4,num_human_players=3,safe_mode=True):
+        self.server_id=random.choice([0,1,2,3])
         self.num_players=num_players
         self.num_human_players=num_human_players
         self.num_random_players=num_players-num_human_players
@@ -29,7 +43,7 @@ class AllActionsEnv(ParallelEnv):
         
     def reset(self,seed=None,options=None):
         self.no_steps_count=0
-        self.new_game_response=start_new_game(num_players=self.num_players)
+        self.new_game_response=start_new_game(num_players=self.num_players,server_id=self.server_id)
         self.game_id=self.new_game_response['id']
         self.envs=[]
         self.player_ids=[]
@@ -45,7 +59,7 @@ class AllActionsEnv(ParallelEnv):
             self.agents.append(agent_id)
             player_id=p['id']
             self.player_ids.append(player_id)
-            env=TerraformingMarsEnv(init_from_player_state=True,player_id=player_id,safe_mode=self.safe_mode)
+            env=TerraformingMarsEnv(init_from_player_state=True,player_id=player_id,safe_mode=self.safe_mode,server_id=self.server_id)
             zz=0
             while env.actions_count==1 and zz<10:
                 zz=zz+1
@@ -72,28 +86,54 @@ class AllActionsEnv(ParallelEnv):
         return env
 
     def step(self,action: int):
+        """
+        Take a step in the environment.
+        
+        Returns
+        -------
+        12-tuple: (obs, rewards, terminations, actions_count, action_list, 
+                   all_rewards, curr_env_id, head_masks, cond_obj, cond_pay, 
+                   cond_extra, factored_legal)
+        
+        The last 5 elements are factored action metadata from the active
+        player's TerraformingMarsEnv, needed for MCTS action selection.
+        """
         rewards:float=0.0
         env=self.envs[self.last_env]
         no_steps=0
+        
+        # Early exit: too many failed steps
         if self.no_steps_count>3:
-            #print(f"Bad no steps2 game={self.game_id}")
-            #print(f"Reward={-1.0}")
-            return env.current_obs,-1.0,True,0,[],{i:self.envs[i].player_states.get('thisPlayer',{}).get('victoryPointsBreakdown',{}).get('total',0) for i in range(self.num_players)},self.last_env
+            # Return with None factored data (terminal state)
+            return (env.current_obs, -1.0, True, 0, [],
+                    {i:self.envs[i].player_states.get('thisPlayer',{}).get('victoryPointsBreakdown',{}).get('total',0) for i in range(self.num_players)},
+                    self.last_env,
+                    None, None, None, None, None)  # factored data = None
+        
+        # Take step in active env
         if env.actions_count>0:
             env.save_metrics_for_reward_calc()
-            actions_count,action_list,obs,terminations,failed=env.step(action)
+            actions_count,action_list,obs,terminations,failed,hm,co,cp,ce,fl=env.step(action)
             no_steps=0 if not failed else no_steps+1
+            
+            # Auto-step through single-action states
             while env.actions_count==1:
-                actions_count,action_list,obs,terminations,failed=env.step(env.actions_list[0])
+                actions_count,action_list,obs,terminations,failed,hm,co,cp,ce,fl=env.step(env.actions_list[0])
                 no_steps=0 if not failed else no_steps+1
+            
             self.stale_state_except(self.last_env)
             rewards=env.get_reward_by_saved_metrics()
             self.rewards[self.last_env]=rewards
+            
             if actions_count>0 and not terminations:
                 self.no_steps_count=0 if not failed else self.no_steps_count+1
-                #print(f"Changed no_steps_count #1 to {self.no_steps_count}")
-                #print(f"Reward={rewards}")
-                return obs,rewards,terminations,actions_count,action_list,{i:self.envs[i].player_states.get('thisPlayer',{}).get('victoryPointsBreakdown',{}).get('total',0) for i in range(self.num_players)},self.last_env
+                # Return with factored data from active env
+                return (obs, rewards, terminations, actions_count, action_list,
+                        {i:self.envs[i].player_states.get('thisPlayer',{}).get('victoryPointsBreakdown',{}).get('total',0) for i in range(self.num_players)},
+                        self.last_env,
+                        hm, co, cp, ce, fl)  # factored action metadata
+        
+        # Search for next active player
         z=0
         eid=self.last_env
         
@@ -103,52 +143,70 @@ class AllActionsEnv(ParallelEnv):
             if eid==self.num_players:
                 eid=0
             env=self.get_env(eid)
+            
+            # Auto-step through single-action states
             while env.actions_count==1 and not failed:
-                _,_,_,_,failed=env.step(env.actions_list[0])
+                _,_,_,_,failed,_hm,_co,_cp,_ce,_fl=env.step(env.actions_list[0])
                 self.stale_state_except(eid)
                 no_steps=0 if not failed else no_steps+1
+            
             if env.actions_count>0:
                 if self.player_types[eid]=="r":
+                    # Random player: take steps until done
                     env.save_metrics_for_reward_calc()
                     zz=0
                     while env.actions_count>0 and zz<100:
                         zz+=1
-                        rac,ral,robs,rterm,failed=env.step(random.choice(env.actions_list))
+                        rac,ral,robs,rterm,failed,_hm,_co,_cp,_ce,_fl=env.step(random.choice(env.actions_list))
                         self.stale_state_except(eid)
                         no_steps=0 if not failed else no_steps+1
                     self.rewards[eid]=env.get_reward_by_saved_metrics()
                     no_steps+=1
-                else: #human
+                else: # human player found
                     self.last_env=eid
+                    
+                    # Auto-step through single-action states
                     while env.actions_count==1:
-                        _,_,_,_,failed=env.step(env.actions_list[0])
+                        _,_,_,_,failed,hm,co,cp,ce,fl=env.step(env.actions_list[0])
                         no_steps=0 if not failed else no_steps+1
+                    
                     self.no_steps_count=0 if not failed else self.no_steps_count+1
-                    #print(f"Reward={rewards}")
-                    return env.current_obs,rewards,env.terminations,env.actions_count,env.actions_list,self.rewards,self.last_env
+                    
+                    # Return with factored data from new active env
+                    return (env.current_obs, rewards, env.terminations, 
+                            env.actions_count, env.actions_list, self.rewards, 
+                            self.last_env,
+                            env.head_masks, env.cond_masks_obj_by_type,
+                            env.cond_masks_pay_by_obj, env.cond_masks_extra_by_pay,
+                            env.factored_legal)
             else:
                 no_steps+=1
+            
+            # Stall detection
             if no_steps>=self.num_players and not (all([env.terminations for env in self.envs])):
                 print(f"No steps for all, wait no_steps={no_steps} self.no_steps_count={self.no_steps_count}")
                 self.no_steps_count+=1
-                #print(f"Changed no_steps_count #3 to {self.no_steps_count}")
                 self.stale_state_except(-1)
                 time.sleep(0.3)
                 continue
 
-                
+        # Game completed        
         if all([env.terminations for env in self.envs]):
             print(f"Game {self.game_id} completed rewards={self.rewards}")
             self.no_steps_count=0 if not failed else self.no_steps_count+1
-            #print(f"Changed no_steps_count #4 to {self.no_steps_count}")
             print(f"Reward={rewards}")
-            return env.current_obs,rewards,env.terminations,env.actions_count,env.actions_list,self.rewards,self.last_env
+            # Return with None factored data (game ended)
+            return (env.current_obs, rewards, env.terminations, 
+                    env.actions_count, env.actions_list, self.rewards, 
+                    self.last_env,
+                    None, None, None, None, None)
         else:
-            #print(f"Bad no steps game={self.game_id}")
+            # Bad state: no valid moves found
             self.no_steps_count+=1
-            #print(f"Changed no_steps_count #5 to {self.no_steps_count}")
-            #print(f"Reward={-1}")
-            return env.current_obs,-1,True,0,[],{i:self.envs[i].player_states.get('thisPlayer',{}).get('victoryPointsBreakdown',{}).get('total',0) for i in range(self.num_players)},self.last_env
+            return (env.current_obs, -1, True, 0, [],
+                    {i:self.envs[i].player_states.get('thisPlayer',{}).get('victoryPointsBreakdown',{}).get('total',0) for i in range(self.num_players)},
+                    self.last_env,
+                    None, None, None, None, None)
 
     def observation_space(self, agent):
         return self.observation_spaces[agent]

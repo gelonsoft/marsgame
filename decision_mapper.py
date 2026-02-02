@@ -40,23 +40,11 @@ class TerraformingMarsDecisionMapper:
         input_type = player_input.get("type")
         
         mapping_functions = {
-            "and": self._map_and_options,
-            "or": self._map_or_options,
-            "initialCards": self._map_select_initial_cards,
+
             "option": self._map_select_option,
-            "projectCard": self._map_select_project_card,
-            "card": self._map_select_card,
-            "amount": self._map_select_amount,
-            "colony": self._map_select_colony,
-            "delegate": self._map_select_delegate,
-            "party": self._map_select_party,
-            "payment": self._map_select_payment,
             "player": self._map_select_player,
-            "productionToLose": self._map_select_production_to_lose,
-            "space": self._map_select_space,
             "aresGlobalParameters": self._map_shift_ares_global_parameters,
             "globalEvent": self._map_select_global_event,
-            "resource": self._map_select_resource,
             "resources": self._map_select_resources
         }
         
@@ -113,14 +101,119 @@ class TerraformingMarsDecisionMapper:
                             }
                             i=i+1
                 elif deffered['xtype']=="xpayment":
+                    payment_resources_map=self.payment_options_calculator.create_basic_payment(0)
+                    choosen_payment=deffered.get('choosen_payment',{})
+                    payment_resources_min_max_map={}
+                    new_x_options=[]
                     for p in deffered['xoptions']:
+                        skip_option=False
+                        for r in choosen_payment.keys():
+                            if choosen_payment[r]!=p[r]:
+                                skip_option=True
+                        if skip_option:
+                            continue
+                        new_x_options.append(p)
+                        for r in payment_resources_map.keys():
+                            v=p[r]
+                            if v>0:
+                                if r not in payment_resources_min_max_map:
+                                    payment_resources_min_max_map[r]={}
+                                payment_resources_min_max_map[r][v]=True
+                    deffered['xoptions']=new_x_options
+                    if len(new_x_options)==1:
                         action_space[i]={
-                            "type":"deffered",
-                            "xid":deffered["xid"],
-                            "xtype":deffered["xtype"],
-                            "xoption":p
-                        }
+                                "type":"deffered",
+                                "xid":deffered["xid"],
+                                "xtype":"xpayment_confirm",
+                                "xoption":new_x_options[0]
+                            }
                         i=i+1
+                    else:
+                        selected_payment_resource=deffered.get('selected',None)
+                        if selected_payment_resource is None:
+                            for p in payment_resources_min_max_map.keys():
+                                if p in choosen_payment:
+                                    continue
+                                action_space[i]={
+                                    "type":"deffered",
+                                    "xid":deffered["xid"],
+                                    "xtype":"xpayment_choose_resource",
+                                    "xoption":p
+                                }
+                                i=i+1
+                        else:
+                            for iii in payment_resources_min_max_map[selected_payment_resource].keys():
+                                action_space[i]={
+                                    "type":"deffered",
+                                    "xid":deffered["xid"],
+                                    "xtype":"xpayment_choose_amount",
+                                    "xres":selected_payment_resource,
+                                    "xoption":int(iii)
+                                }
+                                i=i+1
+                elif deffered['xtype'] in ("xspace_choose_level0", "xspace_choose_level1", "xspace_choose_level2"):
+                    # --- helpers ------------------------------------------------
+                    # Level-0 buckets:  [0-19] [20-39] [40-59] [60-79] [80-99]
+                    # Level-1 buckets within a level-0 bucket of size 20:
+                    #   sub 0: [base+0 .. base+3]
+                    #   sub 1: [base+4 .. base+7]
+                    #   sub 2: [base+8 .. base+11]
+                    #   sub 3: [base+12 .. base+15]
+                    #   sub 4: [base+16 .. base+19]
+                    # Level-2: exact space_id selection within a sub-bucket of 4.
+
+                    valid_spaces = set(deffered['xoptions'])  # original full set
+
+                    def spaces_in_range(lo, hi):
+                        """Return sorted list of valid space_ids in [lo, hi)."""
+                        return sorted(s for s in valid_spaces if lo <= int(s) < hi)
+
+                    if deffered['xtype'] == "xspace_choose_level0":
+                        # Present up to 5 level-0 bucket choices (only those
+                        # containing at least one valid space_id).
+                        for bucket_idx in range(5):
+                            lo = bucket_idx * 20
+                            hi = lo + 20
+                            if spaces_in_range(lo, hi):
+                                action_space[i] = {
+                                    "type": "deffered",
+                                    "xid": deffered["xid"],
+                                    "xtype": "xspace_choose_level0",
+                                    "xoption": bucket_idx  # which 20-wide bucket
+                                }
+                                i += 1
+
+                    elif deffered['xtype'] == "xspace_choose_level1":
+                        # A level-0 bucket was already chosen; present up to 5
+                        # sub-bucket choices within it.
+                        bucket_idx = deffered['xselected_level0']
+                        base = bucket_idx * 20
+                        for sub_idx in range(5):
+                            lo = base + sub_idx * 4
+                            hi = lo + 4
+                            if spaces_in_range(lo, hi):
+                                action_space[i] = {
+                                    "type": "deffered",
+                                    "xid": deffered["xid"],
+                                    "xtype": "xspace_choose_level1",
+                                    "xoption": sub_idx  # which 4-wide sub-bucket
+                                }
+                                i += 1
+
+                    elif deffered['xtype'] == "xspace_choose_level2":
+                        # Both bucket and sub-bucket chosen; present the exact
+                        # valid space_ids (up to 4).
+                        bucket_idx = deffered['xselected_level0']
+                        sub_idx   = deffered['xselected_level1']
+                        base = bucket_idx * 20 + sub_idx * 4
+                        for sid in spaces_in_range(base, base + 4):
+                            action_space[i] = {
+                                "type": "deffered",
+                                "xid": deffered["xid"],
+                                "xtype": "xspace_choose_level2",
+                                "xoption": sid  # the actual space_id
+                            }
+                            i += 1
                 return action_space
             else:
                 raise Exception("Bad first_deffered_action")
@@ -128,25 +221,16 @@ class TerraformingMarsDecisionMapper:
 
         input_type = player_input.get("type")
         if input_type == "and":
-            # For AND options, we need to generate combinations of all sub-options
             options = player_input.get("options", [])
             if not options:
                 return {0: {"type": "and", "responses": []}}
-            
-            # Generate action spaces for each sub-option
             sub_action_spaces = [self.generate_action_space(opt,player_state,False) for opt in options]
-            #for sac in sub_action_spaces:
-            #    print(f"sac={sac}")
-            
-            # Generate all combinations of sub-action indices
             action_indices = product(*[range(len(space)) for space in sub_action_spaces])
             is_limited_amount=len(options)>0
             for opt in options:
                 is_limited_amount &=((opt.get('buttonLabel') in ["Select"]) or ('Spend' in opt.get('buttonLabel'))) and opt.get('type')=="amount"
-            #print(f"is_limited_amount={is_limited_amount}")
             k=0
             for i, indices in enumerate(action_indices):
-                #print(f"i={i} indices={indices}")
                 responses=[]
                 for j, idx in enumerate(indices):
                     r=None
@@ -154,8 +238,6 @@ class TerraformingMarsDecisionMapper:
                         r=sub_action_spaces[j][idx]["responses"][0] 
                     else:
                         r=sub_action_spaces[j][idx]
-                    #print(f"sub_action_spaces={sub_action_spaces}")
-                    #print(f"r={r} sub_action_spaces[{j}][{idx}]={sub_action_spaces[j][idx]}")
                     responses.append(r.copy())               
                 
                 value=0
@@ -164,14 +246,8 @@ class TerraformingMarsDecisionMapper:
                     if rr.get('type',"")=="amount" and isinstance(rr,dict) and rr.get('value',-1)>=0:
                         value+=rr.get('value',0)
                         del rr['value']
-                    #print(f"response: {rr} value={value}")
-                #print(f"value={value} for responses={json.dumps(responses)} is_limited_amount={is_limited_amount}")
                 if is_limited_amount:
-                    #print(responses)
-                    #print(sum([x.get('amount') for x in responses]))
-                    #print(player_input.get('title').get('data')[0].get('value'))
-                    limit_value=int(player_input.get('title').get('data')[0].get('value'))
-                    #print(f"is_limited_amount={is_limited_amount} responses={responses}")
+                    limit_value=int(player_input.get('title',{}).get('data',[{}])[0].get('value'))
                     if isinstance(player_input.get('title',''),dict) and  player_input.get('title',{}).get('message','')=="Select how to spend ${0} heat":
                         if value==limit_value:
                             action_space[k] = {"type": "and", "responses": responses}
@@ -200,6 +276,11 @@ class TerraformingMarsDecisionMapper:
                                        "index":idx,
                                        "response":sub_action_spaces[sub_option_idx]}
                     i+=1
+            for zz in action_space.keys():
+                if 'response' in action_space[zz] and 'type' in action_space[zz]['response'] and action_space[zz]['response']['type']=='space':
+                    has_space=True
+                    break               
+                
         
         elif input_type == "initialCards":
             # For initial cards selection, we need to handle multiple card selections
@@ -235,11 +316,7 @@ class TerraformingMarsDecisionMapper:
         elif input_type == "card":
             # For card selection, generate all combinations within min/max constraints
             original_cards = player_input.get("cards", [])
-            cards=[card for card in original_cards if not card.get('isDisabled',False)]
-            #print(f"Original cards: \n{original_cards}")
-            #print(f"Not disabled cards: \n{cards}")
-            
-            
+            cards=[card for card in original_cards if not card.get('isDisabled',False)]           
             min_cards = player_input.get("min", 0)
             max_cards = player_input.get("max", len(cards))
             #print(f"max_cards={max_cards} min_cards={min_cards} cards={cards}")
@@ -259,16 +336,7 @@ class TerraformingMarsDecisionMapper:
                                 }
                     }
                 }
-            # Generate all possible combinations of cards
-            #action_num = 0
-            #for n in range(min_cards, max_cards + 1):
-            #    from itertools import combinations
-            #    for combo in combinations(cards, n):
-            #        action_space[action_num] = {
-            #            "type": "card",
-            #            "cards": [card["name"] for card in combo]
-            #        }
-            #        action_num += 1
+
         
         elif input_type == "amount":
             # For amount selection, each possible amount is a separate action
@@ -322,7 +390,8 @@ class TerraformingMarsDecisionMapper:
                             "__deferred_action": {
                                 "xid":str(uuid4()),
                                 "xtype": "xpayment",
-                                "xoptions":payments
+                                "xoptions":payments,
+                                "xoriginaloptions":payments
                             }
                         }
                     }
@@ -356,10 +425,16 @@ class TerraformingMarsDecisionMapper:
         elif input_type == "space":
             # For space selection, each space is a separate action
             spaces = player_input.get("spaces", [])
-            for i, space in enumerate(spaces):
-                action_space[i] = {
+            if len(spaces) > 0:
+                action_space[0] = {
                     "type": "space",
-                    "spaceId": space
+                    "spaceId": {
+                        "__deferred_action": {
+                            "xid": str(uuid4()),
+                            "xtype": "xspace_choose_level0",
+                            "xoptions": spaces  # full list of valid space_ids
+                        }
+                    }
                 }
         
         elif input_type == "resources":
@@ -375,6 +450,7 @@ class TerraformingMarsDecisionMapper:
                 pass
 
             payments=self.payment_options_calculator.create_payment_from_input(player_input,selected_card,[],player_state=player_state)
+
             #for i,payment in enumerate(payments):
             action_space[0] = {
                 "type":"payment",
@@ -382,7 +458,8 @@ class TerraformingMarsDecisionMapper:
                         "__deferred_action": {
                             "xid":str(uuid4()),
                             "xtype": "xpayment",
-                            "xoptions":payments
+                            "xoptions":payments,
+                            "xoriginaloptions":payments
                         }
                     }
             }
@@ -393,51 +470,7 @@ class TerraformingMarsDecisionMapper:
         
         return action_space
     
-    def _map_and_options(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map AndOptionsModel to AndOptionsResponse."""
-        options = player_input.get("options", [])
-        responses = []
-        
-        for option in options:
-            responses.append(self.map_decision(option))
-        
-        return {
-            "type": "and",
-            "responses": responses
-        }
-    
-    def _map_or_options(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map OrOptionsModel to OrOptionsResponse."""
-        options = player_input.get("options", [])
-        initial_idx = player_input.get("initialIdx", 0)
-        
-        # Default to the initial index or first option
-        selected_index = min(initial_idx, len(options) - 1) if options else 0
-        
-        # You could add logic here to choose based on context/strategy
-        if self.context and hasattr(self.context, 'strategy_preference'):
-            selected_index = self._choose_or_option_strategically(options, selected_index)
-        
-        selected_option = options[selected_index] if options else {}
-        
-        return {
-            "type": "or",
-            "index": selected_index,
-            "response": self.map_decision(selected_option) if selected_option else {"type": "option"}
-        }
-    
-    def _map_select_initial_cards(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map SelectInitialCardsModel to SelectInitialCardsResponse."""
-        options = player_input.get("options", [])
-        responses = []
-        
-        for option in options:
-            responses.append(self.map_decision(option))
-        
-        return {
-            "type": "initialCards",
-            "responses": responses
-        }
+
     
     def _map_select_option(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
         """Map SelectOptionModel to SelectOptionResponse."""
@@ -445,102 +478,8 @@ class TerraformingMarsDecisionMapper:
             "type": "option"
         }
     
-    def _map_select_project_card(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map SelectProjectCardToPlayModel to SelectProjectCardToPlayResponse."""
-        cards = player_input.get("cards", [])
-        
-        # Choose first available card by default
-        selected_card = cards[0]["name"] if cards else ""
-        
-        # Create payment based on available resources in the input
-        payment = self.payment_options_calculator.create_payment_from_input(player_input, selected_card, cards)
-        
-        return {
-            "type": "projectCard",
-            "card": selected_card,
-            "payment": payment
-        }
-    
-    def _map_select_card(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map SelectCardModel to SelectCardResponse."""
-        cards = player_input.get("cards", [])
-        min_cards = player_input.get("min", 0)
-        max_cards = player_input.get("max", len(cards))
-        
-        # Select cards up to the minimum required, or maximum allowed
-        num_to_select = min(max_cards, max(min_cards, 1))
-        selected_cards = [card["name"] for card in cards[:num_to_select]]
-        
-        return {
-            "type": "card",
-            "cards": selected_cards
-        }
-    
-    def _map_select_amount(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map SelectAmountModel to SelectAmountResponse."""
-        min_amount = player_input.get("min", 0)
-        max_amount = player_input.get("max", 0)
-        max_by_default = player_input.get("maxByDefault", False)
-        
-        # Choose amount based on strategy
-        if max_by_default:
-            amount = max_amount
-        else:
-            amount = min_amount
-        
-        return {
-            "type": "amount",
-            "amount": amount
-        }
-    
-    def _map_select_colony(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map SelectColonyModel to SelectColonyResponse."""
-        colonies = player_input.get("coloniesModel", [])
-        
-        # Select first available colony
-        colony_name = colonies[0]["name"] if colonies else ""
-        
-        return {
-            "type": "colony",
-            "colonyName": colony_name
-        }
-    
-    def _map_select_delegate(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map SelectDelegateModel to SelectDelegateResponse."""
-        players = player_input.get("players", [])
-        
-        # Select first available player/neutral
-        selected_player = players[0] if players else "NEUTRAL"
-        
-        return {
-            "type": "delegate",
-            "player": selected_player
-        }
-    
-    def _map_select_party(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map SelectPartyModel to SelectPartyResponse."""
-        parties = player_input.get("parties", [])
-        
-        # Select first available party
-        party_name = parties[0] if parties else ""
-        
-        return {
-            "type": "party",
-            "partyName": party_name
-        }
-    
-    def _map_select_payment(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map SelectPaymentModel to SelectPaymentResponse."""
-        amount = player_input.get("amount", 0)
-        
-        # Create basic payment with megacredits
-        payment = self.payment_options_calculator.create_basic_payment(amount)
-        
-        return {
-            "type": "payment",
-            "payment": payment
-        }
-    
+
+
     def _map_select_player(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
         """Map SelectPlayerModel to SelectPlayerResponse."""
         players = player_input.get("players", [])
@@ -573,17 +512,7 @@ class TerraformingMarsDecisionMapper:
             "units": response_units
         }
     
-    def _map_select_space(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Map SelectSpaceModel to SelectSpaceResponse."""
-        spaces = player_input.get("spaces", [])
-        
-        # Select first available space
-        space_id = spaces[0] if spaces else ""
-        
-        return {
-            "type": "space",
-            "spaceId": space_id
-        }
+
     
     def _map_shift_ares_global_parameters(self, player_input: Dict[str, Any]) -> Dict[str, Any]:
         """Map ShiftAresGlobalParametersModel to ShiftAresGlobalParametersResponse."""
@@ -643,18 +572,3 @@ class TerraformingMarsDecisionMapper:
             "units": units
         }
         
-    
-
-    
-    def _choose_or_option_strategically(self, options: List[Dict], default_index: int) -> int:
-        """Choose an option based on strategy preference. Override this method for custom logic."""
-        # Simple example: could be extended with game state analysis
-        if self.context.strategy_preference == "aggressive":
-            # Prefer higher risk/reward options (later in list)
-            return min(len(options) - 1, default_index + 1)
-        elif self.context.strategy_preference == "conservative":
-            # Prefer safer options (earlier in list)
-            return max(0, default_index - 1)
-        else:
-            # Balanced: use default
-            return default_index

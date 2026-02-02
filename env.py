@@ -8,7 +8,7 @@ from gymnasium import spaces
 from myutils import find_first_with_nested_attr, get_stat
 from typing import Any, List, Dict
 from myconfig import GAME_START_JSON, MAX_ACTIONS, SERVER_BASE_URL, PLAYER_COLORS
-from observe_gamestate import get_actions_shape, observe  # assuming observe() is defined in another module
+from observe_gamestate import observe  # assuming observe() is defined in another module
 import requests
 import random
 from decision_mapper import TerraformingMarsDecisionMapper
@@ -16,6 +16,7 @@ import logging
 import os
 from decode_observation import decode_observation
 from reward_simple import reward_function
+from factored_actions import FactoredActionEncoder, FACTORED_ACTION_DIMS, ACTION_TYPE_DIM, OBJECT_ID_DIM, PAYMENT_ID_DIM, EXTRA_PARAM_DIM, NUM_HEADS
 
 logging.basicConfig(level=logging.INFO)  # Set the logging level to DEBUG
 
@@ -34,8 +35,8 @@ if USE_MOCK_SERVER:
 LOG_REQUESTS=False
 
 
-def get_player_state(player_id):
-    url = f"{SERVER_BASE_URL}/api/player"
+def get_player_state(player_id,server_id):
+    url = f"{SERVER_BASE_URL[server_id]}/api/player"
     logging.debug(f"get_player_state {player_id}")
     global request_responses,request_number
     if USE_MOCK_SERVER:
@@ -55,8 +56,8 @@ def get_player_state(player_id):
         print(f"Bad get_player_state response:\n{response.text}")
         raise e
 
-def post_player_input(run_id,player_id, player_input_model):
-    url = f"{SERVER_BASE_URL}/player/input"
+def post_player_input(run_id,player_id, player_input_model,server_id):
+    url = f"{SERVER_BASE_URL[server_id]}/player/input"
     player_input_model['runId']=run_id
     global request_responses,request_number
     if USE_MOCK_SERVER:
@@ -77,7 +78,7 @@ def post_player_input(run_id,player_id, player_input_model):
         print(f"Bad post_player_input response:\n{response.text}\npayload:\n{json.dumps(player_input_model)}\n")
         return response.text
 
-def start_new_game(num_players):
+def start_new_game(num_players,server_id):
 
     GAME_START_JSON['players']=[{
             "name": str(i),
@@ -86,7 +87,7 @@ def start_new_game(num_players):
             "handicap": 0,
             "first": False
         } for i in range(num_players)]
-    url = f"{SERVER_BASE_URL}/api/creategame"
+    url = f"{SERVER_BASE_URL[server_id]}/api/creategame"
     global request_responses,request_number
     if USE_MOCK_SERVER:
         response=request_responses[str(request_number)]["response"]
@@ -99,14 +100,14 @@ def start_new_game(num_players):
     if LOG_REQUESTS:
         request_responses[str(request_number)]={"request":response.request.url,"method":"get","response":response_json}
     request_number+=1
-    print(f"Started new game {SERVER_BASE_URL}/spectator?id={response_json['spectatorId']}")
+    print(f"Started new game {SERVER_BASE_URL[server_id]}/game?id={response_json['id']}")
     return response_json
 
 
 class TerraformingMarsEnv():
     metadata = {"render_modes": ["human"], "name": "terraforming_mars_aec_v0","is_parallelizable":True}
 
-    def __init__(self, init_from_player_state=False, player_id=None,player_state=None,waiting_for=None,safe_mode=True):
+    def __init__(self, init_from_player_state=False, player_id=None,player_state=None,waiting_for=None,safe_mode=True,server_id=0):
         self.render_mode='human'
         self.action_slot_map = {}
         self.raise_exceptions=not safe_mode
@@ -114,9 +115,10 @@ class TerraformingMarsEnv():
         self.game_id=None
         self.init_from_player_state=init_from_player_state
         self.start_player_state=None
+        self.server_id=server_id
         if self.init_from_player_state:
             if player_id:
-                self.start_player_state=get_player_state(player_id)
+                self.start_player_state=get_player_state(player_id,server_id)
             else:
                 self.start_player_state=player_state
         self.observations_made=0
@@ -132,13 +134,15 @@ class TerraformingMarsEnv():
         self.truncations = False
         self.deffered_actions=None
         self.skip_full_observation=False
+        self.factored_action_encoder = FactoredActionEncoder()
+        self.action_spaces = spaces.Discrete(MAX_ACTIONS)  # kept for legacy compat; real policy uses factored heads
         self.reset()
         if self.current_obs is None:
             raise Exception("Bad obs state")
         self.observation_shape = self.current_obs.shape
-        self.action_shape=get_actions_shape()
         self.observation_spaces = spaces.Box(low=0.0, high=1.0, shape=self.observation_shape, dtype=np.float32)
-        self.action_spaces = spaces.Discrete(MAX_ACTIONS)
+        
+        # Factored action space: 4 heads with independent discrete ranges
 
 
     def flatten_actions(self, action):
@@ -166,6 +170,14 @@ class TerraformingMarsEnv():
         else:
             action_map = self.decision_mapper.generate_action_space(self.player_states.get("waitingFor"),self.player_states,True,self.deffered_actions)  # Initialize the action map
 
+        global mmax_actions
+        if len(action_map.keys())>mmax_actions:
+            mmax_actions=len(action_map.keys())
+            try:
+                with open(os.path.join("data","max_actions",str(mmax_actions)+".json"),'w',encoding='utf-8') as f:
+                        f.write(json.dumps(action_map,indent=2,skipkeys=True))
+            except:
+                pass
         self.legal_actions = action_map 
 
         slots = list(range(MAX_ACTIONS))
@@ -196,21 +208,60 @@ class TerraformingMarsEnv():
         self.action_lookup = slot_map
         self.actions_list=list(slot_map.keys())
         self.actions_count=len(self.actions_list)
-        
+        # --- Factored action encoding & per-head mask computation -----------
+        # For every legal action, encode it into (type, obj, pay, extra) indices.
+        # Then build 4 conditional masks the policy heads need.
+        self.factored_legal = {}          # slot -> (t, o, p, e)
+        self.head_masks = [
+            np.zeros(ACTION_TYPE_DIM, dtype=np.float32),   # head 0: action_type
+            np.zeros(OBJECT_ID_DIM,   dtype=np.float32),   # head 1: object_id
+            np.zeros(PAYMENT_ID_DIM,  dtype=np.float32),   # head 2: payment_id
+            np.zeros(EXTRA_PARAM_DIM, dtype=np.float32),   # head 3: extra
+        ]
+        # Conditional masks: head1 mask per chosen type, etc.
+        # shape: {type_idx: np.array(OBJECT_ID_DIM)}
+        self.cond_masks_obj_by_type   = {}
+        self.cond_masks_pay_by_obj    = {}
+        self.cond_masks_extra_by_pay  = {}
+
+        for slot, action in slot_map.items():
+            t, o, p, e = self.factored_action_encoder.encode(action)
+            self.factored_legal[slot] = (t, o, p, e)
+            self.head_masks[0][t] = 1.0
+            self.head_masks[1][o] = 1.0
+            self.head_masks[2][p] = 1.0
+            self.head_masks[3][e] = 1.0
+
+            # Conditional: which object_ids are valid given this action_type
+            if t not in self.cond_masks_obj_by_type:
+                self.cond_masks_obj_by_type[t] = np.zeros(OBJECT_ID_DIM, dtype=np.float32)
+            self.cond_masks_obj_by_type[t][o] = 1.0
+
+            # Conditional: which payment_ids are valid given (type, object)
+            key_op = (t, o)
+            if key_op not in self.cond_masks_pay_by_obj:
+                self.cond_masks_pay_by_obj[key_op] = np.zeros(PAYMENT_ID_DIM, dtype=np.float32)
+            self.cond_masks_pay_by_obj[key_op][p] = 1.0
+
+            # Conditional: which extra values are valid given (type, object, payment)
+            key_opp = (t, o, p)
+            if key_opp not in self.cond_masks_extra_by_pay:
+                self.cond_masks_extra_by_pay[key_opp] = np.zeros(EXTRA_PARAM_DIM, dtype=np.float32)
+            self.cond_masks_extra_by_pay[key_opp][e] = 1.0
 
     def _update_agent_state(self,force_update=False):
         if self.start_player_state and self.observations_made==0:
                 self.player_states = self.start_player_state
         else:
             if force_update or (self.deffered_actions is None and not self.skip_full_observation):
-                self.player_states = get_player_state(self.player_id)
+                self.player_states = get_player_state(self.player_id,self.server_id)
             if self.waiting_for and self.observations_made==0:
                 self.player_states["waitingFor"] =self.waiting_for
 
     def _update_agent_observation(self,force_update=False):
         self._update_agent_state(force_update)
         self._generate_agent_action_map()
-        self.current_obs = observe(self.player_states,self.action_slot_map)
+        self.current_obs = observe(self.player_states,self.factored_legal)
         
     def update_state(self):
         self._update_all_observations(force=True)
@@ -255,7 +306,7 @@ class TerraformingMarsEnv():
         if self.init_from_player_state:
             pass
         else:
-            new_game_response=start_new_game(2)
+            new_game_response=start_new_game(2,self.server_id)
             self.game_id=new_game_response['id']
         self.player_id=None
         self.deffered_actions=None
@@ -265,7 +316,7 @@ class TerraformingMarsEnv():
         else:
             player=new_game_response['players'][0]
             self.player_id=player['id']
-            print(f"Player links for new game {SERVER_BASE_URL}/player?id={player['id']}")
+            print(f"Player links for new game {SERVER_BASE_URL[self.server_id]}/player?id={player['id']}")
 
         self.rewards = 0.0
         self.infos = {}
@@ -284,7 +335,7 @@ class TerraformingMarsEnv():
 
 
     def post_player_input(self,player_input):
-        return post_player_input(self.player_states['runId'],self.player_id,player_input)
+        return post_player_input(self.player_states['runId'],self.player_id,player_input,self.server_id)
 
     def _calc_reward_by_metrics(self,prev)->float:
         delta_tr:float=0.0
@@ -343,9 +394,15 @@ class TerraformingMarsEnv():
                         need_sleep=True
                     else:
                         deffered['selected']=selected
-                elif player_input["xtype"]=="xpayment":
+                elif player_input["xtype"]=="xpayment_confirm":
                     parent['payment']=player_input['xoption']
-                    need_sleep=True
+                elif player_input["xtype"]=="xpayment_choose_amount":
+                    choosen_payment=player_input.get('choosen_payment',{})
+                    choosen_payment[player_input.get('xres')]=player_input.get('xoption')
+                    deffered['choosen_payment']=choosen_payment
+                    deffered['selected']=None
+                elif player_input["xtype"]=="xpayment_choose_resource":
+                    deffered['selected']=player_input.get('xoption')
                 elif player_input["xtype"]=="xconfirm_card_choose":
                     selected=deffered.get('selected',[])
                     if len(selected)<deffered['xmin']:
@@ -358,6 +415,24 @@ class TerraformingMarsEnv():
                         raise Exception("len(selected)<0")
                     selected.pop(0)
                     deffered['selected']=selected
+               # --- space narrowing: 3-level deferred selection ----------------
+                elif player_input["xtype"]=="xspace_choose_level0":
+                    # Player picked a 20-wide bucket (0-4).
+                    # Advance xtype to level1 so next generate_action_space
+                    # presents the 4-wide sub-buckets.
+                    deffered['xselected_level0'] = player_input['xoption']
+                    deffered['xtype'] = 'xspace_choose_level1'
+                elif player_input["xtype"]=="xspace_choose_level1":
+                    # Player picked a 4-wide sub-bucket (0-4).
+                    # Advance xtype to level2 so next generate_action_space
+                    # presents the individual space_ids.
+                    deffered['xselected_level1'] = player_input['xoption']
+                    deffered['xtype'] = 'xspace_choose_level2'
+                elif player_input["xtype"]=="xspace_choose_level2":
+                    # Player picked the exact space_id.  Resolve the deferred
+                    # action: replace the __deferred_action dict with the final
+                    # spaceId value so the payload can be posted.
+                    parent['spaceId'] = player_input['xoption']
                 first_deffered_action=find_first_with_nested_attr(self.deffered_actions,"__deferred_action")
                 if first_deffered_action is not None:
                     player_input=None
@@ -372,11 +447,11 @@ class TerraformingMarsEnv():
                     pass
                 if isinstance(res,str):
                     reward = -0.05
-                    print(f"Failed to post player input with input player_link={SERVER_BASE_URL}/player?id={self.player_id}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states.get('waitingSteps',{}), indent=2)}\n")
+                    print(f"Failed to post player input with input player_link={SERVER_BASE_URL[self.server_id]}/player?id={self.player_id}: \n{json.dumps(player_input, indent=2)}\n and waiting steps \n{json.dumps(self.player_states.get('waitingSteps',{}), indent=2)}\n")
                     failed=True
                     with open(os.path.join("data","failed_actions",''.join(random.choices(string.ascii_uppercase + string.digits, k=12))+".json"),'w',encoding='utf-8') as f:
                         f.write(json.dumps({
-                            "player_link": f"{SERVER_BASE_URL}/player?id={self.player_id}",
+                            "player_link": f"{SERVER_BASE_URL[self.server_id]}/player?id={self.player_id}",
                             "player_id": self.player_id,
                             "player_input":player_input,
                             "error":res,
@@ -430,9 +505,9 @@ class TerraformingMarsEnv():
                     if p.get('id','')==self.player_id:
                         self.rewards=p.get('victoryPointsBreakdown',{}).get('total',0)/100.0
         
-        #print(f"Step {SERVER_BASE_URL}/game?id={self.game_id} ... actions: {action} of {list(self.action_lookup.keys())} isTerraformed={self.player_states.get('game',{}).get('isTerraformed',False)} self.terminations={self.terminations} phases={self.player_states.get('game',{}).get('phase',False)}")
+        #print(f"Step {SERVER_BASE_URL[self.server_id]}/game?id={self.game_id} ... actions: {action} of {list(self.action_lookup.keys())} isTerraformed={self.player_states.get('game',{}).get('isTerraformed',False)} self.terminations={self.terminations} phases={self.player_states.get('game',{}).get('phase',False)}")
 
-        return self.actions_count,self.actions_list,self.current_obs,self.terminations,failed
+        return self.actions_count,self.actions_list,self.current_obs,self.terminations,failed,self.head_masks,self.cond_masks_obj_by_type,self.cond_masks_pay_by_obj,self.cond_masks_extra_by_pay,self.factored_legal
 
 
     

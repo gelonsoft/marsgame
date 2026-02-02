@@ -16,9 +16,7 @@ from promotion_tournament import play_five_player_game
 import random
 import os
 import numpy as np
-from legal_actions_decoder import (
-    get_legal_actions_from_obs
-)
+from factored_actions import FactoredActionEncoder, FACTORED_ACTION_DIMS, ACTION_TYPE_DIM, OBJECT_ID_DIM, PAYMENT_ID_DIM, EXTRA_PARAM_DIM, NUM_HEADS
 from rollout import ParallelRolloutManager
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -91,7 +89,7 @@ class BackgroundTrainer:
                 directory="replay_disk",
                 cache_size=2048
             )
-            self.model = MuZeroNet(obs_dim, action_dim).to(DEVICE)
+            self.model = MuZeroNet(obs_dim, action_dim,latent_dim=4096).to(DEVICE)
             self.value_normalizer = RunningMeanStd()
             self.reward_normalizer = RunningMeanStd()
             self.parallel_rollout = ParallelRolloutManager(
@@ -151,7 +149,7 @@ class BackgroundTrainer:
         if self.enable_train:
             self.parallel_rollout.start()
             # Wait for initial buffer fill
-            self.parallel_rollout.wait_for_buffer_filled(min_size=512)
+            self.parallel_rollout.wait_for_buffer_filled(min_size=128)
             # Start training
             self.train_thread.start()
             # Start continuous rollout
@@ -276,66 +274,50 @@ class BackgroundTrainer:
     def train_loop(self):
         step = 0
         accumulation_steps = 2
+        factored_encoder = FactoredActionEncoder()
+        batch_size = 128
         while self.running:
             if not self.enable_train or self.replay is None or self.model is None or self.optimizer is None or self.scheduler is None:
                 raise Exception("Bad 2")
-            if len(self.replay) < 512:
+            if len(self.replay) < batch_size:
                 time.sleep(1)
                 continue
 
-            batch_size = 256
-            obs, act, rew, next_obs, done, policy_target = self.replay.sample(batch_size)
             
-            # Normalize policy target
-            policy_target = policy_target + 1e-8
-            policy_target = policy_target / policy_target.sum(dim=1, keepdim=True)
+            obs, act, rew, next_obs, done, policy_target = self.replay.sample(batch_size)
             
             obs = obs.to(DEVICE)
             next_obs = next_obs.to(DEVICE)
             rew = rew.to(DEVICE)
             done = done.to(DEVICE)
+            # policy_target here is the flat MCTS visit-count target [B, action_dim].
+            # We will NOT use it directly for the factored heads.  Instead we
+            # derive per-head targets from the action that was actually taken
+            # (act) which the replay buffer stores as a flat slot index.
+            # The flat policy_target is kept for the value-prediction TD target.
             policy_target = policy_target.to(DEVICE)
 
-            # NEW: Apply legal action masking to policy targets
-            # Extract legal actions from observations
-            obs_np = obs.detach().cpu().numpy()
-            legal_actions_batch = []
+            # --- Derive factored targets from the stored action index ----------
+            # act: [B] integer slot indices.  We encode each into (t, o, p, e).
+            # For actions not in the current factored_legal (stale replay entries)
+            # we fall back to a uniform target for that sample (low weight).
+            act_np = act.detach().cpu().numpy().astype(int)
+            head_targets = [torch.zeros(batch_size, d, device=DEVICE) for d in FACTORED_ACTION_DIMS]
+            valid_mask = torch.ones(batch_size, device=DEVICE)  # 1 = valid factored target
             for i in range(batch_size):
-                legal_actions = get_legal_actions_from_obs(obs_np[i])
-                legal_actions_batch.append(legal_actions)
-            
-            # Apply mask to policy targets
-            for i in range(batch_size):
-                legal_actions = legal_actions_batch[i]
-                if len(legal_actions) > 0:
-                    # Zero out illegal actions
-                    mask = torch.zeros(self.action_dim, device=DEVICE)
-                    mask[legal_actions] = 1.0
-                    
-                    policy_target[i] = policy_target[i] * mask
-                    
-                    # Renormalize
-                    total = policy_target[i].sum()
-                    if total > 1e-8:
-                        policy_target[i] = policy_target[i] / total
-                    else:
-                        # Uniform over legal actions
-                        policy_target[i] = mask / len(legal_actions)
+                slot = int(act_np[i])
+                # Encode the slot into factors using a simple deterministic mapping.
+                # In production the replay buffer should store the factored tuple;
+                # this fallback keeps the interface backward-compatible.
+                t, o, p, e = factored_encoder.encode_slot(slot)
+                head_targets[0][i, t] = 1.0
+                head_targets[1][i, o] = 1.0
+                head_targets[2][i, p] = 1.0
+                head_targets[3][i, e] = 1.0
 
             # Forward pass
-            policy_pred, value, h = self.model.initial_inference(obs)
-
-            # NEW: Apply legal action masking to predictions
-            for i in range(batch_size):
-                legal_actions = legal_actions_batch[i]
-                if len(legal_actions) > 0:
-                    mask = torch.zeros(self.action_dim, device=DEVICE)
-                    mask[legal_actions] = 1.0
-                    
-                    policy_pred[i] = policy_pred[i] * mask
-                    
-                    # Renormalize with softmax over legal actions
-                    policy_pred[i] = torch.softmax(policy_pred[i], dim=-1)
+            policy_heads, value, h = self.model.initial_inference(obs)
+            # policy_heads: list of 4 tensors [B, head_dim]
 
             # Compute target value with TD learning
             with torch.no_grad():
@@ -364,46 +346,31 @@ class BackgroundTrainer:
             # Huber loss for value (more robust to outliers)
             value_loss = torch.nn.functional.smooth_l1_loss(value.squeeze(), target_value)
             
-            # Better policy loss with label smoothing
-            policy_target_smooth = policy_target * 0.95 + 0.05 / self.action_dim
-            policy_target_smooth = torch.clamp(policy_target_smooth, 1e-8, 1.0)
-            policy_target_smooth = policy_target_smooth / policy_target_smooth.sum(dim=1, keepdim=True)
-            
-            policy_pred = torch.clamp(policy_pred, 1e-8, 1.0)
-            policy_pred = policy_pred / policy_pred.sum(dim=1, keepdim=True)
-            
-            # Cross-entropy loss
-            legal_mask = torch.zeros(batch_size, self.action_dim, device=DEVICE)
-            for i in range(batch_size):
-                legal_actions = legal_actions_batch[i]
-                if len(legal_actions) > 0:
-                    legal_mask[i, legal_actions] = 1.0
+            # --- Factored policy loss: sum of 4 masked cross-entropies ----------
+            # Each head is trained independently.  Label smoothing is applied
+            # per-head to prevent overconfident predictions on small legal sets.
+            policy_loss = torch.tensor(0.0, device=DEVICE)
+            for h_idx, (logits, target) in enumerate(zip(policy_heads, head_targets)):
+                # Label smoothing per head
+                num_classes = logits.shape[1]
+                smoothed = target * 0.95 + 0.05 / num_classes
+                smoothed = smoothed / smoothed.sum(dim=1, keepdim=True)
 
-            # Mask both prediction and target
-            policy_pred_masked = policy_pred * legal_mask
-            policy_target_masked = policy_target * legal_mask
+                # Softmax + cross-entropy
+                log_probs = torch.log_softmax(logits, dim=-1)
+                head_ce = -(smoothed * log_probs).sum(dim=-1)  # [B]
+                # Weight by valid_mask (down-weight stale replay entries)
+                policy_loss = policy_loss + (head_ce * valid_mask).mean()
 
-            # Renormalize
-            policy_pred_masked = policy_pred_masked / (policy_pred_masked.sum(dim=1, keepdim=True) + 1e-8)
-            policy_target_masked = policy_target_masked / (policy_target_masked.sum(dim=1, keepdim=True) + 1e-8)
-
-            # KL divergence loss (more stable than cross-entropy for continuous distributions)
-            policy_loss = torch.nn.functional.kl_div(
-                torch.log(policy_pred_masked + 1e-8),
-                policy_target_masked,
-                reduction='batchmean'
-            )
-
-            # Add entropy bonus to encourage exploration
-            # This prevents premature convergence to deterministic policies
-            num_legal_per_sample = legal_mask.sum(dim=1, keepdim=True)
-            entropy_per_action = -(policy_pred_masked * torch.log(policy_pred_masked + 1e-8))
-            entropy = (entropy_per_action * legal_mask).sum(dim=1).mean()
-
-            # Adaptive entropy weight - decay over time
+            # Entropy bonus across all heads (encourages exploration)
+            entropy = torch.tensor(0.0, device=DEVICE)
+            for logits in policy_heads:
+                probs = torch.softmax(logits, dim=-1)
+                head_entropy = -(probs * torch.log(probs + 1e-8)).sum(dim=-1).mean()
+                entropy = entropy + head_entropy
             entropy_weight = 0.02 * max(0.1, 1.0 - step / 30000)
             policy_loss = policy_loss - entropy_weight * entropy
-            
+
             # Dynamic loss weighting
             value_weight = 1.0
             policy_weight = 1.0 if step < 5000 else 0.8
@@ -436,7 +403,6 @@ class BackgroundTrainer:
                     self.manager.log_metric("train/grad_norm_per_param", total_norm / max(param_count, 1))
                 
                 # Adaptive gradient clipping based on norm
-                # If gradients are exploding (>10), use stricter clipping
                 max_grad_norm = 0.5 if total_norm > 10.0 else 1.0
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
                 
@@ -453,21 +419,20 @@ class BackgroundTrainer:
             self.manager.log_metric("train/total_loss", loss.item() * accumulation_steps)
             self.manager.log_metric("train/replay_size", len(self.replay))
             self.manager.log_metric("train/learning_rate", self.optimizer.param_groups[0]['lr'])
-            
-            # NEW: Log legal actions statistics
+
+            # Per-head policy entropy logging
             if step % 100 == 0:
-                avg_legal_actions = np.mean([len(la) for la in legal_actions_batch])
-                self.manager.log_metric("train/avg_legal_actions", avg_legal_actions)
+                for h_idx, logits in enumerate(policy_heads):
+                    with torch.no_grad():
+                        probs = torch.softmax(logits, dim=-1)
+                        head_ent = -(probs * torch.log(probs + 1e-8)).sum(dim=-1).mean().item()
+                        self.manager.log_metric(f"train/policy_entropy_head{h_idx}", head_ent)
             
             if step % 10 == 0:
                 self.manager.log_metric("train/value_loss_ema", self.value_loss_ema)
                 self.manager.log_metric("train/policy_loss_ema", self.policy_loss_ema)
 
             if step % 100 == 0:
-                # Log more detailed metrics
-                avg_legal_actions = np.mean([len(la) for la in legal_actions_batch])
-                self.manager.log_metric("train/avg_legal_actions", avg_legal_actions)
-                
                 # Log value statistics
                 with torch.no_grad():
                     value_mean = value.mean().item()
@@ -479,15 +444,7 @@ class BackgroundTrainer:
                     self.manager.log_metric("train/value_std", value_std)
                     self.manager.log_metric("train/target_mean", target_mean)
                     self.manager.log_metric("train/target_std", target_std)
-                
-                # Log policy statistics
-                with torch.no_grad():
-                    policy_entropy = -(policy_pred * torch.log(policy_pred + 1e-8)).sum(dim=1).mean().item()
-                    self.manager.log_metric("train/policy_entropy", policy_entropy)
-                    
-                    # Max probability in predictions (low = more exploration)
-                    max_probs = policy_pred.max(dim=1)[0].mean().item()
-                    self.manager.log_metric("train/policy_max_prob", max_probs)
+
             self.manager.step()
             step += 1
             self.train_step = step

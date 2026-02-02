@@ -1,6 +1,25 @@
 """
 Parallel Rollout Implementation for MuZero Training
 Runs 6 concurrent rollout threads to fill replay buffer faster
+
+FACTORED ACTION INTEGRATION:
+----------------------------
+This module has been updated to work with the factored (hierarchical) action
+architecture. Key changes:
+
+1. MCTS.run() now receives factored action metadata from env.step():
+   - head_masks: per-head legal action masks (4 arrays)
+   - cond_masks_*: conditional masks for hierarchical selection
+   - factored_legal: dict mapping slots to (type, obj, pay, extra) tuples
+
+2. Observation space is now 512-dim (pure game state, no encoded actions).
+
+3. env.step() returns 10-tuple instead of 7-tuple, including factored data.
+
+4. Workers cache factored data between steps to pass to next MCTS call.
+
+5. legal_actions_decoder.get_legal_actions_from_obs is no longer used
+   (legal actions come directly from env.step()).
 """
 
 import copy
@@ -13,6 +32,7 @@ import numpy as np
 from typing import List, Dict, Tuple
 from env_all_actions import parallel_env
 from mcts import MCTS
+from factored_actions import FactoredActionEncoder, FACTORED_ACTION_DIMS, ACTION_TYPE_DIM, OBJECT_ID_DIM, PAYMENT_ID_DIM, EXTRA_PARAM_DIM, NUM_HEADS
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -54,6 +74,7 @@ class RolloutWorker:
         
         self.episodes_completed = 0
         self.total_steps = 0
+        self.factored_encoder = FactoredActionEncoder()
         
     def run_episode(self, episode_num: int, max_steps: int) -> List[Tuple]:
         """
@@ -64,6 +85,14 @@ class RolloutWorker:
         replay_data={}
         try:
             obs, infos, action_count, action_list, current_env_id = self.env.reset()
+            
+            # Initialize factored action data attributes (will be set after first step)
+            self.last_head_masks = None
+            self.last_cond_obj = None
+            self.last_cond_pay = None
+            self.last_cond_extra = None
+            self.last_factored_legal = None
+            
             episode_reward = 0
             step_count = 0
             done = False
@@ -84,12 +113,19 @@ class RolloutWorker:
                     temperature = max(0.5, base_temperature - (step_count / max_steps) * 0.5)
                     
                     # Run MCTS to get policy
+                    # Note: head_masks and conditional masks come from previous env.step()
+                    # On first step they'll be None and MCTS will use safe defaults
                     policy = torch.tensor(
                         self.mcts.run(
                             obs_vec,
-                            legal_actions=None,  # MCTS extracts from obs
+                            legal_actions=action_list,
                             temperature=temperature,
-                            training=True
+                            training=True,
+                            head_masks=getattr(self, 'last_head_masks', None),
+                            cond_masks_obj_by_type=getattr(self, 'last_cond_obj', None),
+                            cond_masks_pay_by_obj=getattr(self, 'last_cond_pay', None),
+                            cond_masks_extra_by_pay=getattr(self, 'last_cond_extra', None),
+                            factored_legal=getattr(self, 'last_factored_legal', None)
                         )
                     ).detach().cpu()
                     
@@ -100,17 +136,12 @@ class RolloutWorker:
                     # Select action
                     action = 0
                     if action_count > 0:
-                        # Get legal actions and mask
-                        from legal_actions_decoder import get_legal_actions_from_obs
-                        legal_actions_from_obs = get_legal_actions_from_obs(obs)
+                        # Use legal actions directly from env (already available in action_list)
+                        legal_actions = action_list
                         
-                        # Verify consistency
-                        if set(legal_actions_from_obs) != set(action_list):
-                            legal_actions_from_obs = action_list
-                        
-                        # Apply mask
+                        # Apply mask to policy
                         mask = np.zeros(self.action_dim)
-                        mask[legal_actions_from_obs] = 1.0
+                        mask[legal_actions] = 1.0
                         
                         masked_policy = policy.numpy() * mask
                         masked_policy_sum = masked_policy.sum()
@@ -118,20 +149,28 @@ class RolloutWorker:
                         if masked_policy_sum > 1e-18:
                             masked_policy = masked_policy / masked_policy_sum
                         else:
-                            masked_policy = mask / len(legal_actions_from_obs)
+                            masked_policy = mask / len(legal_actions)
                         
                         masked_policy2 = np.clip(masked_policy, 1e-18, 1e6)
                         
                         try:
                             action = int(np.random.choice(self.action_dim, p=masked_policy2))
                         except:
-                            action = random.choice(legal_actions_from_obs)
+                            action = random.choice(legal_actions)
                         
-                        if action not in legal_actions_from_obs:
-                            action = random.choice(legal_actions_from_obs)
+                        if action not in legal_actions:
+                            action = random.choice(legal_actions)
                     
                     # Take action in environment
-                    next_obs, rewards, terms, action_count, action_list, all_rewards, curr_eid = self.env.step(action)
+                    # env.step() now returns 10-tuple with factored action data
+                    next_obs, rewards, terms, action_count, action_list, all_rewards, curr_eid, head_masks, cond_obj, cond_pay, cond_extra, factored_legal = self.env.step(action)
+                    
+                    # Store factored action data for next MCTS call
+                    self.last_head_masks = head_masks
+                    self.last_cond_obj = cond_obj
+                    self.last_cond_pay = cond_pay
+                    self.last_cond_extra = cond_extra
+                    self.last_factored_legal = factored_legal
                     
                     # Clip reward
                     reward = float(max(-2.0, min(2.0, rewards)))
@@ -233,7 +272,7 @@ class ParallelRolloutManager:
         manager,
         num_workers: int = 6,
         action_dim: int = 64,
-        obs_dim: int = 4608,
+        obs_dim: int = 512,  # Updated: no more encoded actions in obs
         mcts_config: dict = None
     ):
         self.model = model
@@ -397,7 +436,9 @@ class ParallelRolloutManager:
         """
         Curriculum learning: gradually increase episode length.
         """
-        if episode_num < 1000:
+        if episode_num < 15:
+            return episode_num*2
+        elif episode_num < 1000:
             return 30
         elif episode_num < 3000:
             return 50
@@ -519,10 +560,10 @@ if __name__ == "__main__":
             pass
     
     # Create model and replay buffer
-    model = MuZeroNet(obs_dim=4608, action_dim=64).to(DEVICE)
+    model = MuZeroNet(obs_dim=512, action_dim=64).to(DEVICE)
     replay = ReplayBuffer(
         capacity=10000,
-        obs_dim=4608,
+        obs_dim=512,
         action_dim=64,
         device=DEVICE,
         directory="test_replay",
@@ -537,14 +578,14 @@ if __name__ == "__main__":
         manager=manager,
         num_workers=6,
         action_dim=64,
-        obs_dim=4608
+        obs_dim=512  # Updated: no more encoded actions in obs
     )
     
     # Start workers
     parallel_rollout.start()
     
     # Fill buffer with 1000 transitions
-    parallel_rollout.wait_for_buffer_filled(min_size=1000)
+    parallel_rollout.wait_for_buffer_filled(min_size=128)
     
     # Run for a bit
     print("\nRunning rollouts for 30 seconds...")

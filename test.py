@@ -1,9 +1,10 @@
 import numpy as np
-from env import SERVER_BASE_URL, TerraformingMarsEnv
+from env_all_actions import SERVER_BASE_URL, TerraformingMarsEnv
 import json 
 import random
 import pyarrow as pa
 from decode_observation import decode_observation
+from myconfig import MAX_ACTIONS
 
 player_id=None
 player_state=None
@@ -1489,9 +1490,9 @@ player_state="""
 
 
 
-env=TerraformingMarsEnv(["1","2"],False,player_state,None,None,safe_mode=False)
+env=TerraformingMarsEnv(False,player_state,None,safe_mode=False)
 MAX_ROWS=10000
-num_actions=env.observation_space(env.possible_agents[0]).shape[0]
+num_actions=MAX_ACTIONS
 
 #with open("")
 rand=random.Random()
@@ -1500,24 +1501,24 @@ next_obs, rewards, terms, truncs, infos=(None,None,None,None,None)
 while True:
     is_no_actions=True
     agent="1"
-    max_actions=len(env.action_lookup[agent].keys())
+    max_actions=len(env.action_lookup.keys())
     action=0
     if max_actions>1:
-        action=rand.choice(list(env.action_lookup[agent].keys()))
+        action=rand.choice(list(env.action_lookup.keys()))
         is_no_actions=False
     elif max_actions==1:
-        action=rand.choice(list(env.action_lookup[agent].keys()))
+        action=rand.choice(list(env.action_lookup.keys()))
     else:
         is_no_actions=False
         action=0
     #print(f"F {agent}:{actions[agent]}/{max_actions}")
-    if terms and terms.get('1',False):
+    if terms:
         terms=None
-        env=TerraformingMarsEnv(["1","2"],False,None,None,None,safe_mode=False)
+        env=TerraformingMarsEnv(False,None,None,None,safe_mode=False)
     else:
         next_obs, rewards, terms, truncs, infos=env.step(action)
         #result[i]=next_obs['1']
-        obs_new=decode_observation(next_obs['1'])
+        #obs_new=decode_observation(next_obs)
         i+=1
         if i>=MAX_ROWS:
             print("Done")
@@ -1529,7 +1530,7 @@ while True:
             break   
         #print(f"Encoder data step done {i}")
 
-for agent in env.agents:
-    print(f"player_link={SERVER_BASE_URL}/player?id={env.agent_id_to_player_id[agent]}")
+for agent in env:
+    print(f"player_link={SERVER_BASE_URL[env.server_id]}/player?id={env.agent_id_to_player_id[agent]}")
     
 #np.save("test.npy",result)
