@@ -1,4 +1,4 @@
-from trainer import BackgroundTrainer
+from trainer import FinalCompleteTrainer
 from env_all_actions import parallel_env
 from observe_gamestate import observe
 from myconfig import MAX_ACTIONS
@@ -22,5 +22,5 @@ print(obs_dim)
 print(MAX_ACTIONS)
 
 env=None
-trainer = BackgroundTrainer(args,obs_dim, action_dim)
+trainer = FinalCompleteTrainer(args,obs_dim, action_dim)
 trainer.start()

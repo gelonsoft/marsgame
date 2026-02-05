@@ -7,3 +7,4 @@ encoder_train.csv
 data/
 .vscode/
 replay_disk/
+replay_buffer/
