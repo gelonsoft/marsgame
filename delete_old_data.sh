@@ -1,0 +1,1 @@
+while true; do ls -1t /cygdrive/c/dev/marsgame/runs/muzero*/*pt | awk 'NR > 5' | xargs rm -f {} \; ; find /cygdrive/c/dev/terraforming-mars/db/ -name '*.json' -type f -mmin +10 -delete ; echo "done";sleep 300s; done
