@@ -8,3 +8,4 @@ data/
 .vscode/
 replay_disk/
 replay_buffer/
+x.log

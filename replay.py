@@ -533,7 +533,7 @@ class PrioritizedReplayBuffer:
         """
         n = self.size
         if n == 0:
-            return np.ones(1, dtype=np.float32)
+            return np.ones(0, dtype=np.float32)
         
         priorities = np.ones(n, dtype=np.float32)
         
